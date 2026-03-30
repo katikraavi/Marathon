@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../generated/reports.pb.dart';
 import '../models/report.dart';
 import '../utils/constants.dart';
 
@@ -12,6 +13,9 @@ class WebSocketService {
   final StreamController<Report> _reportStream = StreamController.broadcast();
   final StreamController<String> _eventStream = StreamController.broadcast();
   final StreamController<bool> _connectionStatus = StreamController.broadcast();
+
+  /// Cache of last report per device for event-based report conversion
+  final Map<int, Report> _lastReportsByDevice = {};
 
   bool _isConnected = false;
   Timer? _reconnectTimer;
@@ -72,13 +76,29 @@ class WebSocketService {
     _timeBasedChannel.stream.listen(
       (dynamic message) {
         try {
+          Report report;
+          
           if (message is String) {
+            // JSON fallback for backward compatibility
             final json = jsonDecode(message) as Map<String, dynamic>;
-            final report = Report.fromJson(json);
-            _reportStream.add(report);
+            report = Report.fromJson(json);
+          } else if (message is List<int>) {
+            // Protobuf message
+            final timeBasedReport = TimeBasedReport.fromBuffer(message);
+            report = Report.fromTimeBasedReport(timeBasedReport);
+          } else {
+            print('[WebSocket] Unknown message type: ${message.runtimeType}');
+            return;
           }
+          
+          // Cache the report for event-based report conversion
+          _lastReportsByDevice[report.deviceId] = report;
+          
+          _reportStream.add(report);
+          print('[WebSocket] Time-based report: Device ${report.deviceId}, '
+                'HR: ${report.heartbeat}, BR: ${report.breath}, Distance: ${report.distanceCovered}m');
         } catch (e) {
-          print('[WebSocket] Error parsing report: $e');
+          print('[WebSocket] Error parsing time-based report: $e');
         }
       },
       onError: (error) {
@@ -97,10 +117,50 @@ class WebSocketService {
       (dynamic message) {
         try {
           if (message is String) {
+            // JSON fallback for backward compatibility
             _eventStream.add(message);
+          } else if (message is List<int>) {
+            // Protobuf EventBasedReport
+            final eventReport = EventBasedReport.fromBuffer(message);
+            
+            // Get last report for this device or create default
+            final lastReport = _lastReportsByDevice[eventReport.deviceId] ??
+                Report(
+                  deviceId: eventReport.deviceId,
+                  heartbeat: 0,
+                  breath: 0,
+                  systolicBp: 120,
+                  diastolicBp: 80,
+                  bloodOxygen: 98,
+                  temperature: 37.0,
+                  distanceCovered: 0,
+                  timestamp: DateTime.now(),
+                );
+            
+            // Convert event to report and cache it
+            final report = Report.fromEventBasedReport(eventReport, lastReport);
+            _lastReportsByDevice[report.deviceId] = report;
+            
+            // Emit as event stream for special handling
+            String eventType = '';
+            switch (eventReport.eventId) {
+              case 1:
+                eventType = 'Blood Pressure: ${eventReport.eventData.join('/')}';
+                break;
+              case 2:
+                eventType = 'Blood Oxygen: ${eventReport.eventData.firstOrNull}%';
+                break;
+              case 3:
+                eventType = 'Temperature: ${(eventReport.eventData.firstOrNull ?? 0) / 10.0}°C';
+                break;
+            }
+            
+            _eventStream.add(eventType);
+            print('[WebSocket] Event-based report: Device ${eventReport.deviceId}, '
+                  'Event: $eventType');
           }
         } catch (e) {
-          print('[WebSocket] Error parsing event: $e');
+          print('[WebSocket] Error parsing event-based report: $e');
         }
       },
       onError: (error) {

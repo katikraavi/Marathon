@@ -24,7 +24,7 @@ class RunnerData {
       systolicBp: report.systolicBp,
       diastolicBp: report.diastolicBp,
       bloodOxygen: report.bloodOxygen,
-      temperature: report.temperature,
+      temperature: (report.temperature * 10).toInt(),
     );
   }
 
