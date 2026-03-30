@@ -87,20 +87,111 @@ adb install build/app/outputs/flutter-apk/app-release.apk
 
 ## 🔌 Backend Setup (Required)
 
-The app streams data from a WebSocket backend. Set up the test data generator:
+The app streams data from a WebSocket backend powered by gRPC and Kafka. The data generator service simulates marathon runners' wearable devices.
+
+### Quick Backend Setup
 
 ```bash
-# 1. Pull Docker image
-docker pull ghcr.io/futurecoders-org/marathon-data-generator:latest
+# 1. Navigate to project root
+cd /home/katikraavi/Marathon
 
-# 2. Start containers
+# 2. Start all services (Zookeeper + Kafka + Data Generator)
 docker compose up -d
 
-# 3. Verify running
-docker ps
+# 3. Verify services running
+docker compose ps
+# Expected: zookeeper, kafka, and data-generator all in "healthy" state
+
+# 4. View data generator logs
+docker compose logs -f data-generator
+
+# 5. To stop services
+docker compose down
 ```
 
-WebSocket will be available at `ws://10.0.2.2:8080` (Android emulator).
+### Backend Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│  Flutter App (Marathon Safety)                  │
+│  - WebSocket Client (gRPC)                      │
+│  - Protobuf Message Parser                      │
+└──────────────────┬──────────────────────────────┘
+                   │ ws://localhost:8080
+                   │ or ws://10.0.2.2:8080 (Android Emulator)
+                   ↓
+┌─────────────────────────────────────────────────┐
+│  Data Generator (gRPC Server)                   │
+│  - Streams TimeBasedReport (every 1 sec)        │
+│  - Streams EventBasedReport (on vital changes)  │
+│  - Kafka Integration for persistence            │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────────────┐
+│  Kafka Message Broker                           │
+│  - Persists all vital reports                   │
+│  - Ensures no data loss during outages          │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────────────────┐
+│  Zookeeper (Kafka Coordinator)                  │
+│  - Manages broker coordination                  │
+│  - Handles leader election                      │
+└─────────────────────────────────────────────────┘
+```
+
+### Service Details
+
+| Service | Port | Purpose | Health Check |
+|---------|------|---------|--------------|
+| **Zookeeper** | 22181 | Kafka coordination | Echo "ruok" |
+| **Kafka** | 29092 | Message broker | List topics |
+| **Data Generator** | 8080 | gRPC server for runner data | gRPC health check |
+
+### Environment Variables
+
+The data generator accepts these environment variables (optional):
+
+```bash
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092  # Kafka broker address
+GRPC_PORT=8080                       # gRPC server port
+LOG_LEVEL=info                       # Logging level
+```
+
+### Troubleshooting Backend
+
+**Service won't start:**
+```bash
+# Check logs
+docker compose logs data-generator
+
+# Restart specific service
+docker compose restart data-generator
+
+# Full reset
+docker compose down
+docker compose up -d
+```
+
+**Can't connect from app:**
+- Ensure backend is running: `docker compose ps`
+- For Android Emulator: Use `ws://10.0.2.2:8080` (not localhost)
+- For physical device: Use device host IP, e.g., `ws://192.168.1.100:8080`
+- For iOS Simulator: Use `ws://localhost:8080`
+
+**Checking backend connectivity:**
+```bash
+# Test gRPC endpoint
+grpcurl -plaintext localhost:8080 list
+
+# View incoming data
+docker compose exec data-generator ./client
+
+# Produce test data
+docker compose exec data-generator ./producer
+```
 
 ---
 
