@@ -1,0 +1,29 @@
+# APK builds
+*.apk
+
+# Build outputs
+build/
+*.app
+
+# iOS
+ios/Pods/
+
+# Android
+android/.gradle/
+android/local.properties
+
+# Flutter
+.dart_tool/
+.flutter-plugins-dependencies
+.packages
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
