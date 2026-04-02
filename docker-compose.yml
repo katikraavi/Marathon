@@ -28,18 +28,29 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     healthcheck:
       test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
       interval: 10s
       timeout: 10s
       retries: 5
 
-  data-generator:
-    image: ghcr.io/futurecoders-org/marathon-data-generator:latest
+  kafka-init:
+    image: confluentinc/cp-kafka:7.3.0
     depends_on:
       kafka:
         condition: service_healthy
+    entrypoint: /bin/bash
+    command: -c "kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic time-based-messages --partitions 1 --replication-factor 1 && kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic event-based-messages --partitions 1 --replication-factor 1 && echo 'Topics created successfully'"
+    environment:
+      KAFKA_BROKER_ID: ignored
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
+  data-generator:
+    image: ghcr.io/futurecoders-org/marathon-data-generator:latest
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       GRPC_PORT: 8080
