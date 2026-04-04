@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 import '../../data/repositories/runner_repository.dart';
 import '../../data/models/report.dart';
 import '../../data/models/runner_data.dart';
@@ -7,16 +8,44 @@ import '../../data/models/runner_data.dart';
 class RunnerDetailProvider extends ChangeNotifier {
   final RunnerRepository repository;
   final int deviceId;
-  late RunnerData _runner;
+  Timer? _refreshTimer;
 
   RunnerDetailProvider({
     required this.repository,
     required this.deviceId,
   }) {
-    _runner = repository.getRunner(deviceId) ?? RunnerData(deviceId: deviceId);
+    // Listen to repository for all updates
+    repository.addListener(_onRepositoryChanged);
+    
+    // Periodic refresh: every 50ms to ensure UI is always current
+    // This is critical for real-time updates since reports come in frequently
+    _refreshTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      notifyListeners();
+    });
   }
 
-  RunnerData get runner => _runner;
+  void _onRepositoryChanged() {
+    // Immediately notify when repository changes
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    repository.removeListener(_onRepositoryChanged);
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  // Always get the latest runner from the repository - never cache it
+  // This ensures the UI always reflects the most current data
+  RunnerData get runner {
+    final repoRunner = repository.getRunner(deviceId);
+    if (repoRunner != null) {
+      return repoRunner;
+    }
+    // If runner doesn't exist yet, return empty runner (will get populated when first report arrives)
+    return RunnerData(deviceId: deviceId);
+  }
 
   // Current vitals
   int get currentHeartbeat => runner.getAverageHeartbeat();
@@ -97,11 +126,6 @@ class RunnerDetailProvider extends ChangeNotifier {
 
     // Return most recent events first
     return events.reversed.toList();
-  }
-
-  void updateRunner(RunnerData newRunner) {
-    _runner = newRunner;
-    notifyListeners();
   }
 }
 

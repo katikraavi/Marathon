@@ -162,6 +162,20 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: Theme.of(context).textTheme.bodySmall,
                       textAlign: TextAlign.center,
                     ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _isLoading
+                            ? null
+                            : () {
+                          _usernameController.text = 'admin';
+                          _passwordController.text = 'admin123';
+                        },
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Fill Demo Credentials'),
+                      ),
+                    ),
                   ],
                 ),
               ),

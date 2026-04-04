@@ -12,9 +12,9 @@ class AppConstants {
   static const String timeBasedReportsEndpoint = '/time_based_reports';
   static const String eventBasedReportsEndpoint = '/event_based_reports';
 
-  // Data caching limits
-  static const int maxReportsPerDevice = 600; // ~10 mins at 1 report/second
-  static const int reportWindowSeconds = 600; // 10 minutes
+  // Data caching limits (optimized for 500 runners)
+  static const int maxReportsPerDevice = 60; // ~1 minute at 1 report/second (reduced from 600)
+  static const int reportWindowSeconds = 60; // 1 minute (reduced from 600)
 
   // Notification configuration
   static const String notificationChannelId = 'marathon_safety_alerts';

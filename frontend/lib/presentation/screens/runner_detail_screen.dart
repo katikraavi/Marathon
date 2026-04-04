@@ -22,53 +22,344 @@ class RunnerDetailScreen extends StatefulWidget {
 }
 
 class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
+  late RunnerDetailProvider _detailProvider;
+
+  @override
+  void initState() {
+    super.initState();
+    _detailProvider = RunnerDetailProvider(
+      repository: widget.repository,
+      deviceId: widget.deviceId,
+    );
+  }
+
+  @override
+  void dispose() {
+    _detailProvider.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => RunnerDetailProvider(
-        repository: widget.repository,
-        deviceId: widget.deviceId,
-      ),
+    return ChangeNotifierProvider<RunnerDetailProvider>.value(
+      value: _detailProvider,
       child: Scaffold(
         appBar: AppBar(
-          title: Text('Runner #${widget.deviceId} - Health Details'),
+          title: Text(
+            'Runner #${widget.deviceId}',
+            style: const TextStyle(fontSize: 16),
+          ),
           centerTitle: true,
+          toolbarHeight: 40,
         ),
-        body: Consumer<RunnerDetailProvider>(
+        body: _DetailBody(
+          detailProvider: _detailProvider,
+          deviceId: widget.deviceId,
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailBody extends StatefulWidget {
+  final RunnerDetailProvider detailProvider;
+  final int deviceId;
+
+  const _DetailBody({
+    required this.detailProvider,
+    required this.deviceId,
+  });
+
+  @override
+  State<_DetailBody> createState() => _DetailBodyState();
+}
+
+class _DetailBodyState extends State<_DetailBody> {
+  late Stream<void> _refreshStream;
+
+  @override
+  void initState() {
+    super.initState();
+    // Create a stream that emits every 50ms to force rebuilds
+    _refreshStream = Stream.periodic(const Duration(milliseconds: 50), (_) => null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<void>(
+      stream: _refreshStream,
+      builder: (context, snapshot) {
+        return Consumer<RunnerDetailProvider>(
           builder: (context, detailProvider, child) {
             final runner = detailProvider.runner;
             final health = runner.healthStatus;
+            final lastReport = runner.reports.isNotEmpty ? runner.reports.last : null;
+            final healthColor = _getHealthColor(health.state);
 
             return SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Current vitals summary
-                  _VitalsSummaryCard(
-                    runner: runner,
-                    health: health,
+                  Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: healthColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(2),
+                        border: Border(
+                          left: BorderSide(color: healthColor, width: 3),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Device #${runner.deviceId}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 3,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: healthColor,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  health.state.toString().split('.').last.toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 1),
+                          GridView.count(
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 2,
+                            mainAxisSpacing: 0,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            childAspectRatio: 0.55,
+                            children: health.vitalDetails.map((detail) {
+                              final statusColor = detail.status == HealthState.normal
+                                  ? Colors.green
+                                  : detail.status == HealthState.warning
+                                      ? Colors.orange
+                                      : Colors.red;
+
+                              IconData getIcon(String name) {
+                                switch (name) {
+                                  case 'Heartbeat':
+                                    return Icons.favorite;
+                                  case 'Breath Rate':
+                                    return Icons.air;
+                                  case 'Systolic BP':
+                                    return Icons.favorite_border;
+                                  case 'Diastolic BP':
+                                    return Icons.favorite_border;
+                                  case 'Blood Oxygen':
+                                    return Icons.air;
+                                  case 'Temperature':
+                                    return Icons.thermostat;
+                                  default:
+                                    return Icons.info;
+                                }
+                              }
+
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 2),
+                                child: Container(
+                                  padding: const EdgeInsets.only(left: 2, right: 2, top: 1, bottom: 1),
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      left: BorderSide(color: statusColor, width: 2),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Icon and name
+                                      Row(
+                                        children: [
+                                          Icon(getIcon(detail.name), size: 10, color: statusColor),
+                                          const SizedBox(width: 1),
+                                          Expanded(
+                                            child: Text(
+                                              detail.name,
+                                              style: const TextStyle(
+                                                fontSize: 8,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      // Current value
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Value',
+                                            style: TextStyle(
+                                              fontSize: 5,
+                                              color: Colors.grey.shade600,
+                                            ),
+                                          ),
+                                          RichText(
+                                            text: TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text: detail.value,
+                                                  style: TextStyle(
+                                                    fontSize: 8,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: statusColor,
+                                                  ),
+                                                ),
+                                                TextSpan(
+                                                  text: ' ${detail.unit}',
+                                                  style: TextStyle(
+                                                    fontSize: 5,
+                                                    color: Colors.grey.shade600,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ),
+                                      // Normal range
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Normal',
+                                            style: TextStyle(
+                                              fontSize: 5,
+                                              color: Colors.grey.shade600,
+                                            ),
+                                          ),
+                                          Text(
+                                            detail.normalRange,
+                                            style: const TextStyle(
+                                              fontSize: 5,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.green,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ),
+                                      // Status badge
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 2,
+                                          vertical: 0,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: statusColor,
+                                          borderRadius: BorderRadius.circular(2),
+                                        ),
+                                        child: Text(
+                                          detail.status.toString().split('.').last.toUpperCase(),
+                                          style: const TextStyle(
+                                            fontSize: 5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 1),
+                          if (runner.lastUpdateTime != null)
+                            Text(
+                              'Updated: ${DateFormat('HH:mm:ss').format(runner.lastUpdateTime!)} • ${health.reason}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: healthColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          if (health.state == HealthState.normal)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(2),
+                                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(Icons.check_circle, size: 12, color: Colors.green),
+                                    SizedBox(width: 2),
+                                    Expanded(
+                                      child: Text(
+                                        'All vitals within normal ranges',
+                                        style: TextStyle(
+                                          fontSize: 8,
+                                          color: Colors.green,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
-
-                  const Divider(),
-
-                  // Charts section
+                  const Divider(height: 1),
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Vital Signs (Last 10 Minutes)',
-                          style: Theme.of(context).textTheme.titleMedium,
+                          'Vital Signs Charts',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade800,
+                          ),
                         ),
-                        const SizedBox(height: 16),
-
-                        // Heartbeat chart
+                        const SizedBox(height: 4),
                         Text(
-                          'Heartbeat (BPM)',
-                          style: Theme.of(context).textTheme.labelLarge,
+                          'Heartbeat',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 2),
                         _VitalChart(
                           data: detailProvider.heartbeatChartData,
                           normalMin: 60,
@@ -76,14 +367,16 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
                           warningMin: 40,
                           warningMax: 170,
                         ),
-                        const SizedBox(height: 24),
-
-                        // Breath rate chart
+                        const SizedBox(height: 6),
                         Text(
-                          'Breath Rate (Breaths/min)',
-                          style: Theme.of(context).textTheme.labelLarge,
+                          'Breath Rate',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 2),
                         _VitalChart(
                           data: detailProvider.breathChartData,
                           normalMin: 45,
@@ -95,19 +388,21 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
                     ),
                   ),
 
-                  const Divider(),
-
-                  // Event log
+                  const Divider(height: 1),
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Vital Changes Log',
-                          style: Theme.of(context).textTheme.titleMedium,
+                          'Changes',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade800,
+                          ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 2),
                         if (detailProvider.vitalEvents.isEmpty)
                           Text(
                             'No changes recorded',
@@ -121,7 +416,8 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
                             itemBuilder: (context, index) {
                               final event = detailProvider.vitalEvents[index];
                               return ListTile(
-                                contentPadding: EdgeInsets.zero,
+                                contentPadding: const EdgeInsets.symmetric(vertical: 2, horizontal: 0),
+                                dense: true,
                                 leading: Icon(
                                   _getEventIcon(event.type),
                                   color: Colors.blue,
@@ -139,13 +435,13 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
                     ),
                   ),
 
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 8),
                 ],
               ),
             );
           },
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -161,122 +457,6 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
         return Icons.info;
     }
   }
-}
-
-class _VitalsSummaryCard extends StatelessWidget {
-  final RunnerData runner;
-  final HealthStatus health;
-
-  const _VitalsSummaryCard({
-    required this.runner,
-    required this.health,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final lastReport = runner.reports.isNotEmpty ? runner.reports.last : null;
-    final healthColor = _getHealthColor(health.state);
-
-    return Card(
-      margin: const EdgeInsets.all(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          border: Border(
-            left: BorderSide(color: healthColor, width: 4),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Device #${runner.deviceId}',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: healthColor,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    health.state.toString().split('.').last.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Current vitals grid
-            GridView.count(
-              crossAxisCount: 2,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _VitalTile(
-                  label: 'Heartbeat',
-                  value: '${runner.getAverageHeartbeat()}',
-                  unit: 'BPM',
-                  icon: Icons.favorite,
-                ),
-                _VitalTile(
-                  label: 'Breath Rate',
-                  value: '${runner.getAverageBreath()}',
-                  unit: '/min',
-                  icon: Icons.air,
-                ),
-                if (lastReport != null) ...[
-                  _VitalTile(
-                    label: 'Distance',
-                    value: '${runner.distance.toStringAsFixed(2)}',
-                    unit: 'km',
-                    icon: Icons.location_on,
-                  ),
-                  _VitalTile(
-                    label: 'Blood Oxygen',
-                    value: '${lastReport.bloodOxygen}',
-                    unit: '%',
-                    icon: Icons.air,
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Timestamp and status
-            if (runner.lastUpdateTime != null)
-              Text(
-                'Last update: ${DateFormat('HH:mm:ss').format(runner.lastUpdateTime!)}',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-
-            const SizedBox(height: 8),
-            Text(
-              'Status: ${health.reason}',
-              style: TextStyle(
-                color: healthColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Color _getHealthColor(HealthState state) {
     switch (state) {
@@ -290,48 +470,80 @@ class _VitalsSummaryCard extends StatelessWidget {
   }
 }
 
+
 class _VitalTile extends StatelessWidget {
   final String label;
   final String value;
   final String unit;
   final IconData icon;
+  final Color? color;
 
   const _VitalTile({
     required this.label,
     required this.value,
     required this.unit,
     required this.icon,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(8),
+        color: (color ?? Colors.blue).withOpacity(0.08),
+        border: Border.all(
+          color: (color ?? Colors.blue).withOpacity(0.2),
+          width: 0.5,
+        ),
+        borderRadius: BorderRadius.circular(2),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Row(
         children: [
-          Icon(icon, size: 24, color: Colors.blue),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall,
+          Icon(
+            icon,
+            size: 20,
+            color: color ?? Colors.blue,
           ),
-          const SizedBox(height: 4),
-          RichText(
-            text: TextSpan(
+          const SizedBox(width: 1),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                TextSpan(
-                  text: value,
-                  style: Theme.of(context).textTheme.titleSmall,
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                TextSpan(
-                  text: ' $unit',
-                  style: Theme.of(context).textTheme.labelSmall,
+                RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: value,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: color ?? Colors.blue,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' $unit',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -361,10 +573,10 @@ class _VitalChart extends StatelessWidget {
   Widget build(BuildContext context) {
     if (data.isEmpty) {
       return Container(
-        height: 200,
+        height: 80,
         decoration: BoxDecoration(
           color: Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(3),
         ),
         child: const Center(
           child: Text('Waiting for data...'),
@@ -376,13 +588,13 @@ class _VitalChart extends StatelessWidget {
     final minY = ((data.map((d) => d.y).reduce((a, b) => a < b ? a : b) * 0.9).clamp(0, double.infinity)) as double;
 
     return Container(
-      height: 250,
+      height: 120,
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(3),
       ),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(4),
       child: LineChart(
         LineChartData(
           minX: 0,

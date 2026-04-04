@@ -23,52 +23,70 @@ class _RaceListScreenState extends State<RaceListScreen> {
   @override
   void initState() {
     super.initState();
-    _setupServices();
+    _initializeServices();
   }
 
-  void _setupServices() {
-    _repository = RunnerRepository();
-    _webSocketService = WebSocketService();
+  void _initializeServices() {
+    try {
+      // Get the global services that were already initialized and started loading
+      _repository = context.read<RunnerRepository>();
+      _webSocketService = context.read<WebSocketService>();
+    } catch (e) {
+      print('[ERROR] Failed to read global services: $e');
+      // Fallback: create new services if global ones aren't available
+      _repository = RunnerRepository();
+      _webSocketService = WebSocketService();
+      
+      // Connect WebSocket if we created new service
+      _webSocketService.connect();
+    }
 
-    // Connect to WebSocket
-    _webSocketService.connect();
+    // Setup listeners after services are ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _setupListeners();
+    });
+  }
 
-    // Listen to reports
-    _webSocketService.reportStream.listen((report) {
-      _repository.addReport(report);
+  void _setupListeners() {
+    try {
+      // Update connection status from WebSocket
+      _webSocketService.connectionStatus.listen((isConnected) {
+        if (mounted) {
+          setState(() => _isConnected = isConnected);
+        }
+      });
 
-      // Check for health state changes and show notifications
-      if (_repository.hasHealthStateChanged(report.deviceId)) {
-        final runner = _repository.getRunner(report.deviceId);
-        if (runner != null) {
-          final healthStatus = runner.healthStatus;
-          final notificationService = NotificationService();
+      // Listen to reports and handle notifications
+      _webSocketService.reportStream.listen((report) {
+        // Check for health state changes and show notifications
+        if (_repository.hasHealthStateChanged(report.deviceId)) {
+          final runner = _repository.getRunner(report.deviceId);
+          if (runner != null) {
+            final healthStatus = runner.healthStatus;
+            final notificationService = NotificationService();
 
-          if (healthStatus.state == HealthState.emergency) {
-            notificationService.showEmergencyAlert(
-              runnerId: report.deviceId,
-              reason: 'Emergency: Runner ${report.deviceId} is ill. ${healthStatus.reason}',
-            );
-          } else if (healthStatus.state == HealthState.warning) {
-            notificationService.showWarningAlert(
-              runnerId: report.deviceId,
-              reason: 'Warning: Runner ${report.deviceId} is at risk. ${healthStatus.reason}',
-            );
+            if (healthStatus.state == HealthState.emergency) {
+              notificationService.showEmergencyAlert(
+                runnerId: report.deviceId,
+                reason: 'Emergency: Runner ${report.deviceId} is ill. ${healthStatus.reason}',
+              );
+            } else if (healthStatus.state == HealthState.warning) {
+              notificationService.showWarningAlert(
+                runnerId: report.deviceId,
+                reason: 'Warning: Runner ${report.deviceId} is at risk. ${healthStatus.reason}',
+              );
+            }
           }
         }
-      }
-    });
-
-    // Listen to connection status
-    _webSocketService.connectionStatus.listen((isConnected) {
-      setState(() => _isConnected = isConnected);
-    });
+      });
+    } catch (e) {
+      print('[ERROR] Failed to setup listeners: $e');
+    }
   }
 
   @override
   void dispose() {
-    _webSocketService.dispose();
-    _repository.dispose();
+    // Don't dispose global services - they should keep running
     super.dispose();
   }
 
@@ -117,196 +135,305 @@ class _RaceListScreenState extends State<RaceListScreen> {
             ),
           ],
         ),
-        body: Consumer<RunnersProvider>(
-          builder: (context, runnersProvider, child) {
-            final runners = runnersProvider.filteredAndSortedRunners;
-
-            return Column(
-              children: [
-                // Control bar
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  color: Colors.grey.shade100,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Stats row
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _StatCard(
-                            label: 'Total Runners',
-                            value: runnersProvider.totalRunners.toString(),
-                            color: Colors.blue,
-                          ),
-                          _StatCard(
-                            label: 'Normal',
-                            value: runnersProvider.normalCount.toString(),
-                            color: Colors.green,
-                          ),
-                          _StatCard(
-                            label: 'Warning',
-                            value: runnersProvider.warningCount.toString(),
-                            color: Colors.orange,
-                          ),
-                          _StatCard(
-                            label: 'Emergency',
-                            value: runnersProvider.emergencyCount.toString(),
-                            color: Colors.red,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Sorting controls
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButton<String>(
-                              value: runnersProvider.sortBy,
-                              isExpanded: true,
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'distance',
-                                  child: Text('Sort by Distance'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'device_id',
-                                  child: Text('Sort by Device ID'),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                if (value != null) {
-                                  runnersProvider.setSortBy(value);
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            icon: Icon(
-                              runnersProvider.sortAscending
-                                  ? Icons.arrow_upward
-                                  : Icons.arrow_downward,
-                            ),
-                            onPressed: () {
-                              runnersProvider
-                                  .setSortAscending(!runnersProvider.sortAscending);
-                            },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Health state filters
-                      Text(
-                        'Filter by Health:',
-                        style: Theme.of(context).textTheme.labelMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          FilterChip(
-                            label: const Text('All'),
-                            selected: runnersProvider.filterState == null,
-                            onSelected: (_) =>
-                                runnersProvider.setFilterState(null),
-                          ),
-                          FilterChip(
-                            label: const Text('Normal'),
-                            selected:
-                                runnersProvider.filterState == HealthState.normal,
-                            onSelected: (_) => runnersProvider
-                                .setFilterState(HealthState.normal),
-                          ),
-                          FilterChip(
-                            label: const Text('Warning'),
-                            selected:
-                                runnersProvider.filterState == HealthState.warning,
-                            onSelected: (_) => runnersProvider
-                                .setFilterState(HealthState.warning),
-                          ),
-                          FilterChip(
-                            label: const Text('Emergency'),
-                            selected: runnersProvider.filterState ==
-                                HealthState.emergency,
-                            onSelected: (_) => runnersProvider
-                                .setFilterState(HealthState.emergency),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Runner list
-                Expanded(
-                  child: runners.isEmpty
-                      ? Center(
-                    child: Text(
-                      'Waiting for runner data...',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  )
-                      : ListView.builder(
-                    itemCount: runners.length,
-                    itemBuilder: (context, index) {
-                      final runner = runners[index];
-                      return _RunnerListTile(
-                        runner: runner,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => RunnerDetailScreen(
-                                deviceId: runner.deviceId,
-                                repository: _repository,
-                              ),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            );
-          },
+        body: Column(
+          children: [
+            // OPTIMIZATION: Separate Consumer for control bar (stats + filters)
+            // This rebuilds independently from runner list
+            _ControlBar(),
+            
+            // OPTIMIZATION: Separate Consumer for runner list
+            // Only this widget rebuilds when runner data changes
+            _RunnerListSection(repository: _repository),
+          ],
         ),
       ),
     );
   }
 }
 
-class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+/// OPTIMIZATION: Extracted control bar with stats and filters
+/// Rebuilds only when provider state changes, separate from list
+class _ControlBar extends StatelessWidget {
+  const _ControlBar({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: color,
+    return Consumer<RunnersProvider>(
+      builder: (context, runnersProvider, child) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.grey.shade100,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Stats row - only rebuilds when health stats change
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _StatCard(
+                    label: 'Total Runners',
+                    value: runnersProvider.totalRunners.toString(),
+                    color: Colors.blue,
+                  ),
+                  _StatCard(
+                    label: 'Normal',
+                    value: runnersProvider.normalCount.toString(),
+                    color: Colors.green,
+                  ),
+                  _StatCard(
+                    label: 'Warning',
+                    value: runnersProvider.warningCount.toString(),
+                    color: Colors.orange,
+                  ),
+                  _StatCard(
+                    label: 'Emergency',
+                    value: runnersProvider.emergencyCount.toString(),
+                    color: Colors.red,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Sorting controls
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButton<String>(
+                      value: runnersProvider.sortBy,
+                      isExpanded: true,
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'distance',
+                          child: Text('Sort by Distance'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'device_id',
+                          child: Text('Sort by Device ID'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          runnersProvider.setSortBy(value);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(
+                      runnersProvider.sortAscending
+                          ? Icons.arrow_upward
+                          : Icons.arrow_downward,
+                    ),
+                    onPressed: () {
+                      runnersProvider
+                          .setSortAscending(!runnersProvider.sortAscending);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Health state filters
+              Text(
+                'Filter by Health:',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  FilterChip(
+                    label: const Text('All'),
+                    selected: runnersProvider.filterState == null,
+                    onSelected: (_) =>
+                        runnersProvider.setFilterState(null),
+                  ),
+                  FilterChip(
+                    label: const Text('Normal'),
+                    selected:
+                        runnersProvider.filterState == HealthState.normal,
+                    onSelected: (_) => runnersProvider
+                        .setFilterState(HealthState.normal),
+                  ),
+                  FilterChip(
+                    label: const Text('Warning'),
+                    selected:
+                        runnersProvider.filterState == HealthState.warning,
+                    onSelected: (_) => runnersProvider
+                        .setFilterState(HealthState.warning),
+                  ),
+                  FilterChip(
+                    label: const Text('Emergency'),
+                    selected: runnersProvider.filterState ==
+                        HealthState.emergency,
+                    onSelected: (_) => runnersProvider
+                        .setFilterState(HealthState.emergency),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-      ],
+        );
+      },
+    );
+  }
+}
+
+/// OPTIMIZATION: Extracted runner list section
+/// Rebuilds only when runner data changes, independent from control bar
+class _RunnerListSection extends StatelessWidget {
+  final RunnerRepository repository;
+
+  const _RunnerListSection({
+    Key? key,
+    required this.repository,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Consumer<RunnersProvider>(
+        builder: (context, runnersProvider, child) {
+          final runners = runnersProvider.filteredAndSortedRunners;
+          final totalRunners = runnersProvider.totalRunners;
+          final isLoading = runnersProvider.isLoading;
+          final loadingProgress = runnersProvider.loadingProgress;
+
+          // Show loading state with progress
+          if (runners.isEmpty && totalRunners == 0) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading runner data... (0/500)',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // Show partial data loading with progress
+          if (runners.isEmpty && totalRunners > 0) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Loading runner data... ($totalRunners/500)',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Filtering: ${runnersProvider.filterState ?? 'All'} runners',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // Display runners with loading overlay if still loading
+          return Stack(
+            children: [
+              // Runners list
+              ListView.builder(
+                itemCount: runners.length,
+                itemBuilder: (context, index) {
+                  final runner = runners[index];
+                  return _RunnerListTile(
+                    runner: runner,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => RunnerDetailScreen(
+                            deviceId: runner.deviceId,
+                            repository: repository,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+              
+              // Loading overlay while fetching data
+              if (isLoading)
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.1),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.2),
+                                blurRadius: 8,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              const CircularProgressIndicator(),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Loading Runners',
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '$totalRunners / 500',
+                                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                  color: Colors.blue,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: loadingProgress,
+                                  minHeight: 8,
+                                  backgroundColor: Colors.grey.shade300,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.blue.shade400,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                '${(loadingProgress * 100).toStringAsFixed(0)}%',
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -316,66 +443,23 @@ class _RunnerListTile extends StatelessWidget {
   final VoidCallback onTap;
 
   const _RunnerListTile({
+    Key? key,
     required this.runner,
     required this.onTap,
-  });
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final health = runner.healthStatus;
-    final healthColor = _getHealthColor(health.state);
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: ListTile(
-        onTap: onTap,
-        leading: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: healthColor.withOpacity(0.2),
-          ),
-          child: Center(
-            child: Icon(
-              _getHealthIcon(health.state),
-              color: healthColor,
-              size: 28,
-            ),
-          ),
-        ),
-        title: Text(
-          'Device #${runner.deviceId}',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Distance: ${runner.distance.toStringAsFixed(2)} km'),
-            Text(
-              health.reason,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: healthColor,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-        trailing: Chip(
-          label: Text(
-            health.state.toString().split('.').last.toUpperCase(),
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          backgroundColor: healthColor,
-        ),
-        isThreeLine: true,
+    return ListTile(
+      title: Text('Device ${runner.deviceId}'),
+      subtitle: Text(
+        'Distance: ${runner.distance.toStringAsFixed(2)}m',
       ),
+      trailing: Icon(
+        _getHealthIcon(runner.healthStatus.state),
+        color: _getHealthColor(runner.healthStatus.state),
+      ),
+      onTap: onTap,
     );
   }
 
@@ -399,5 +483,49 @@ class _RunnerListTile extends StatelessWidget {
       case HealthState.emergency:
         return Icons.emergency;
     }
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _StatCard({
+    Key? key,
+    required this.label,
+    required this.value,
+    required this.color,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: color.withOpacity(0.1),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: color,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

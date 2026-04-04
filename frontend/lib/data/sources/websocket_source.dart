@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'dart:io' show Platform, WebSocket;
+import 'package:web_socket_channel/io.dart';
 import '../../generated/reports.pb.dart';
 import '../models/report.dart';
 import '../../config/constants.dart';
 
 class WebSocketService {
-  late WebSocketChannel _timeBasedChannel;
-  late WebSocketChannel _eventBasedChannel;
+  late IOWebSocketChannel _timeBasedChannel;
+  late IOWebSocketChannel _eventBasedChannel;
   
   final StreamController<Report> _reportStream = StreamController.broadcast();
   final StreamController<String> _eventStream = StreamController.broadcast();
@@ -19,9 +19,15 @@ class WebSocketService {
 
   bool _isConnected = false;
   Timer? _reconnectTimer;
+  Timer? _keepAliveTimer;  // NEW: Keep-alive heartbeat
+  Timer? _stalenessCheckTimer;  // NEW: Staleness detection
   int _reconnectAttempts = 0;
+  DateTime _lastMessageTime = DateTime.now();  // NEW: Track last message
+  
   static const int maxReconnectAttempts = 5;
   static const Duration reconnectDelay = Duration(seconds: 3);
+  static const Duration keepAliveInterval = Duration(seconds: 30);  // Ping every 30s
+  static const Duration stalenessThreshold = Duration(seconds: 90);  // Reconnect if no message for 90s
 
   Stream<Report> get reportStream => _reportStream.stream;
   Stream<String> get eventStream => _eventStream.stream;
@@ -42,26 +48,46 @@ class WebSocketService {
     try {
       print('[WebSocket] Attempting to connect to $_baseUrl');
       
-      final timeBasedUrl = Uri.parse(
-        '$_baseUrl${AppConstants.timeBasedReportsEndpoint}',
-      );
-      final eventBasedUrl = Uri.parse(
-        '$_baseUrl${AppConstants.eventBasedReportsEndpoint}',
-      );
+      // Construct full WebSocket URLs
+      final timeBasedUrl = '$_baseUrl${AppConstants.timeBasedReportsEndpoint}';
+      final eventBasedUrl = '$_baseUrl${AppConstants.eventBasedReportsEndpoint}';
+      
+      print('[WebSocket] Time-based URL: $timeBasedUrl');
+      print('[WebSocket] Event-based URL: $eventBasedUrl');
 
-      _timeBasedChannel = WebSocketChannel.connect(timeBasedUrl);
-      _eventBasedChannel = WebSocketChannel.connect(eventBasedUrl);
+      // Connect time-based reports FIRST (primary data source)
+      try {
+        _timeBasedChannel = IOWebSocketChannel.connect(timeBasedUrl);
+        await _timeBasedChannel.ready;
+        print('[WebSocket] Time-based connection ready');
+      } catch (e) {
+        print('[WebSocket] Time-based connection failed: $e');
+        rethrow;
+      }
 
-      // Wait for connection to establish
-      await Future.wait([
-        _timeBasedChannel.ready,
-        _eventBasedChannel.ready,
-      ]);
+      // Try event-based connection (secondary, non-critical)
+      try {
+        _eventBasedChannel = IOWebSocketChannel.connect(eventBasedUrl);
+        await _timeBasedChannel.ready.timeout(Duration(seconds: 5), onTimeout: () {
+          print('[WebSocket] Event-based connection timeout (non-critical)');
+        });
+        print('[WebSocket] Event-based connection ready');
+      } catch (e) {
+        print('[WebSocket] Event-based connection failed (non-critical): $e');
+        // Don't fail if event-based fails - time-based is sufficient
+      }
 
       _isConnected = true;
       _reconnectAttempts = 0;
+      _lastMessageTime = DateTime.now();
       _connectionStatus.add(true);
-      print('[WebSocket] Connected successfully');
+      print('[WebSocket] Connected successfully (time-based active)');
+
+      // Start keep-alive heartbeat to prevent connection drops
+      _startKeepAlive();
+      
+      // Start staleness detection to detect broken connections early
+      _startStalenessCheck();
 
       // Listen to both streams
       _listenToTimeBasedReports();
@@ -78,14 +104,32 @@ class WebSocketService {
         try {
           Report report;
           
+          // Try JSON first (most common format from data generator)
           if (message is String) {
-            // JSON fallback for backward compatibility
-            final json = jsonDecode(message) as Map<String, dynamic>;
-            report = Report.fromJson(json);
+            try {
+              final json = jsonDecode(message) as Map<String, dynamic>;
+              report = Report.fromJson(json);
+            } catch (e) {
+              print('[WebSocket] JSON parse failed, trying as List<int>: $e');
+              rethrow;
+            }
           } else if (message is List<int>) {
-            // Protobuf message
-            final timeBasedReport = TimeBasedReport.fromBuffer(message);
-            report = Report.fromTimeBasedReport(timeBasedReport);
+            try {
+              // Try protobuf first
+              final timeBasedReport = TimeBasedReport.fromBuffer(message);
+              report = Report.fromTimeBasedReport(timeBasedReport);
+            } catch (e) {
+              // If binary fails, try decoding as UTF-8 string then JSON
+              try {
+                final jsonString = utf8.decode(message);
+                final json = jsonDecode(jsonString) as Map<String, dynamic>;
+                report = Report.fromJson(json);
+              } catch (e2) {
+                print('[WebSocket] Both protobuf and JSON parsing failed');
+                print('[WebSocket] Error details: $e, $e2');
+                rethrow;
+              }
+            }
           } else {
             print('[WebSocket] Unknown message type: ${message.runtimeType}');
             return;
@@ -94,7 +138,12 @@ class WebSocketService {
           // Cache the report for event-based report conversion
           _lastReportsByDevice[report.deviceId] = report;
           
-          _reportStream.add(report);
+          // Update last message time for staleness detection
+          _lastMessageTime = DateTime.now();
+          
+          if (!_reportStream.isClosed) {
+            _reportStream.add(report);
+          }
           print('[WebSocket] Time-based report: Device ${report.deviceId}, '
                 'HR: ${report.heartbeat}, BR: ${report.breath}, Distance: ${report.distanceCovered}m');
         } catch (e) {
@@ -118,7 +167,9 @@ class WebSocketService {
         try {
           if (message is String) {
             // JSON fallback for backward compatibility
-            _eventStream.add(message);
+            if (!_eventStream.isClosed) {
+              _eventStream.add(message);
+            }
           } else if (message is List<int>) {
             // Protobuf EventBasedReport
             final eventReport = EventBasedReport.fromBuffer(message);
@@ -155,7 +206,9 @@ class WebSocketService {
                 break;
             }
             
-            _eventStream.add(eventType);
+            if (!_eventStream.isClosed) {
+              _eventStream.add(eventType);
+            }
             print('[WebSocket] Event-based report: Device ${eventReport.deviceId}, '
                   'Event: $eventType');
           }
@@ -176,24 +229,87 @@ class WebSocketService {
 
   void _handleConnectionError() {
     _isConnected = false;
-    _connectionStatus.add(false);
-
-    // Attempt to reconnect
-    if (_reconnectAttempts < maxReconnectAttempts) {
-      _reconnectAttempts++;
-      print('[WebSocket] Reconnecting in ${reconnectDelay.inSeconds}s '
-            '(attempt $_reconnectAttempts/$maxReconnectAttempts)');
-      
-      _reconnectTimer?.cancel();
-      _reconnectTimer = Timer(reconnectDelay, () {
-        connect();
-      });
-    } else {
-      print('[WebSocket] Max reconnection attempts reached');
+    
+    // Only add to connection status if the stream is still open
+    if (!_connectionStatus.isClosed) {
+      _connectionStatus.add(false);
     }
+
+    // Attempt to reconnect with adaptive backoff
+    _reconnectAttempts++;
+    
+    // Adaptive backoff: 
+    // - First 5 attempts: 3s, 6s, 9s, 12s, 15s (exponential)
+    // - After 5: stay at 5s for faster recovery when service restarts
+    late int backoffSeconds;
+    if (_reconnectAttempts <= 5) {
+      backoffSeconds = 3 * _reconnectAttempts;
+    } else {
+      // After trying hard, retry every 5s so we catch service recovery faster
+      backoffSeconds = 5;
+    }
+    
+    final nextDelay = Duration(seconds: backoffSeconds);
+    
+    print('[WebSocket] Reconnecting in ${nextDelay.inSeconds}s '
+          '(attempt $_reconnectAttempts, adaptive backoff)');
+    
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(nextDelay, () {
+      print('[WebSocket] Attempting to reconnect (attempt $_reconnectAttempts)...');
+      connect();
+    });
+  }
+
+  /// Start WebSocket keep-alive heartbeat to prevent idle timeouts
+  /// Sends periodic ping frames to keep connection alive
+  void _startKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer.periodic(keepAliveInterval, (_) {
+      try {
+        if (_isConnected && _timeBasedChannel.closeCode == null) {
+          // Send ping frame to server (WebSocket protocol level)
+          // This keeps NAT mappings alive and prevents proxy timeouts
+          print('[WebSocket] Sending keep-alive ping');
+          _timeBasedChannel.sink.add('ping');  // Simple ping message
+          
+          if (_eventBasedChannel.closeCode == null) {
+            _eventBasedChannel.sink.add('ping');
+          }
+        }
+      } catch (e) {
+        print('[WebSocket] Keep-alive error: $e');
+      }
+    });
+  }
+
+  /// Start staleness detection to identify broken connections early
+  /// If no message received for 90s, force reconnect
+  void _startStalenessCheck() {
+    _stalenessCheckTimer?.cancel();
+    _stalenessCheckTimer = Timer.periodic(Duration(seconds: 30), (_) {
+      if (!_isConnected) return;
+      
+      final timeSinceLastMessage = DateTime.now().difference(_lastMessageTime);
+      
+      if (timeSinceLastMessage > stalenessThreshold) {
+        print('[WebSocket] Connection stale (no data for ${timeSinceLastMessage.inSeconds}s), '
+              'forcing reconnect');
+        _handleConnectionError();
+      } else if (timeSinceLastMessage.inSeconds > 45) {
+        print('[WebSocket] Connection becoming stale (${timeSinceLastMessage.inSeconds}s since last message)');
+      }
+    });
+  }
+
+  /// Stop keep-alive and staleness monitors
+  void _stopKeepaliveMonitors() {
+    _keepAliveTimer?.cancel();
+    _stalenessCheckTimer?.cancel();
   }
 
   Future<void> disconnect() async {
+    _stopKeepaliveMonitors();  // Stop monitoring threads
     _reconnectTimer?.cancel();
     _isConnected = false;
     _connectionStatus.add(false);
@@ -201,17 +317,17 @@ class WebSocketService {
     try {
       await _timeBasedChannel.sink.close();
       await _eventBasedChannel.sink.close();
-      print('[WebSocket] Disconnected');
+      print('[WebSocket] Disconnected gracefully');
     } catch (e) {
       print('[WebSocket] Error during disconnect: $e');
     }
   }
 
   void dispose() {
+    _stopKeepaliveMonitors();  // Stop monitoring
     _reconnectTimer?.cancel();
-    _reportStream.close();
-    _eventStream.close();
-    _connectionStatus.close();
+    // Don't close stream controllers - they may be reused on reconnect
+    // Only close web socket channels
     try {
       _timeBasedChannel.sink.close();
       _eventBasedChannel.sink.close();

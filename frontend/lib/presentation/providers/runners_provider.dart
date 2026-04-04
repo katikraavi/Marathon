@@ -9,7 +9,12 @@ class RunnersProvider extends ChangeNotifier {
   bool _sortAscending = false;
   HealthState? _filterState;
 
-  RunnersProvider({required this.repository});
+  RunnersProvider({required this.repository}) {
+    // Listen to repository changes and propagate them
+    repository.addListener(() {
+      notifyListeners();
+    });
+  }
 
   String get sortBy => _sortBy;
   bool get sortAscending => _sortAscending;
@@ -34,6 +39,10 @@ class RunnersProvider extends ChangeNotifier {
   int get normalCount => repository.getHealthStateDistribution()[HealthState.normal] ?? 0;
   int get warningCount => repository.getHealthStateDistribution()[HealthState.warning] ?? 0;
   int get emergencyCount => repository.getHealthStateDistribution()[HealthState.emergency] ?? 0;
+  
+  // Show loading until we have at least 80% of runners (400/500)
+  bool get isLoading => repository.runnerCount < 400;
+  double get loadingProgress => repository.runnerCount / 500.0;
 
   void setSortBy(String sortBy) {
     _sortBy = sortBy;

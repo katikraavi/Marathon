@@ -75,3 +75,4 @@ env/
 coverage/
 .nyc_output/
 test_coverage/
+*.apk

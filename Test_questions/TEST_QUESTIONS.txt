@@ -1,0 +1,90 @@
+MARATHON SAFETY APPLICATION - TEST REQUIREMENTS & QUESTIONS
+================================================================
+
+MANDATORY REQUIREMENTS
+======================
+
+1. Repository contains complete source code and configuration files +
+
+2. Documentation (README) includes all required sections +
+   - Check presence of:
+     • Project overview
+     • Complete setup instructions
+     • Usage guide
+
+3. Application runs successfully on a physical or virtual device with chosen platform (Android/iOS). +
+
+4. Application has one set of credentials that allows access to it +
+
+5. Application features a list of all marathon participants whose devices are sending reports +
+
+
+PARTICIPANT LIST & SORTING/FILTERING
+====================================
+
+6. Participant list is ordered by their current track distance covered in descending order by default +
+
+7. Participant list can be sorted by current track distance covered +
+   - Verify that sorting can be done in ascending and descending orders.
+
+8. Participant list can be sorted by runner's device ID number +
+   - Verify that sorting can be done in ascending and descending orders.
+
+9. Each runner in the participant list features visual current health state indicator +
+   - Verify that state indicators correspond to normal, warning, emergency states.
+
+10. Participant list can be filtered by current health state +
+
+11. Health state is determined and calculated from wearable devices' vitals reports
+
+
+HEALTH STATE & NOTIFICATIONS
+=============================
+
+12. If any runner has 2 or more health warnings concurrently, their current health state becomes an emergency
+
+13. Application features real-time system push notifications when any runner enters a health warning or health emergency state
+
+
+HEALTH OBSERVATIONS PAGE
+========================
+
+14. Application has a health observations page for each individual runner
+
+15. Page features runner's most up-to-date marathon and health data
+    - Verify that page shows current heartbeats and breaths per minute, track distance covered, current health state, and time to which data corresponds.
+
+16. Page features line chart with data points showcasing change of heartbeats-per-minute health parameter
+
+17. Page features line chart with data points showcasing change of breaths-per-minute health parameter
+
+
+CHARTS & REAL-TIME UPDATES
+==========================
+
+18. Charts display data over last 10 minutes of the race
+
+19. Charts are updated in real-time according to wearable devices' reports
+
+20. Page has a list of blood pressure/blood oxygen/temperature changes if they ever happen with the individual runner
+
+21. Application displays real-time data updates from the reports only for the widgets that are currently in view on screen
+
+22. In case of errors or exceptions the messenger reloads whenever possible to the last stable state
+
+
+EXTRA REQUIREMENTS
+==================
+
+23. Application code is properly organized and adheres to good practices
+    - Verify logical organization of the lib folder files, check if code has consistent naming and formatting
+
+24. Application interface is intuitive and user-friendly
+
+25. Application consumes and analyzes incoming report streams in real time with minimal possible lag
+
+26. Project is easy to launch without installing full Flutter setup or other dependencies
+    - .apk file is provided and instructions are given to run it on Android, a lightweight emulator, and a browser-based emulator.
+
+27. Student has implemented additional technologies and/or features beyond the core requirements
+    - Ask the student to demonstrate all of them.

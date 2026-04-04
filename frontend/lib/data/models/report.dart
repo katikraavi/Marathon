@@ -24,16 +24,77 @@ class Report {
   });
 
   factory Report.fromJson(Map<String, dynamic> json) {
+    // Handle timestamp - can be int (milliseconds) or String (ISO8601)
+    DateTime parseTimestamp(dynamic timestampValue) {
+      if (timestampValue == null) return DateTime.now();
+      if (timestampValue is int) {
+        return DateTime.fromMillisecondsSinceEpoch(timestampValue);
+      } else if (timestampValue is num) {
+        return DateTime.fromMillisecondsSinceEpoch(timestampValue.toInt());
+      } else if (timestampValue is String) {
+        try {
+          return DateTime.parse(timestampValue);
+        } catch (e) {
+          return DateTime.now();
+        }
+      }
+      return DateTime.now();
+    }
+
+    // Extract heartbeat from either singular field or array length
+    int extractHeartbeat(Map<String, dynamic> json) {
+      // Try singular 'heartbeat' field first
+      if (json['heartbeat'] != null && json['heartbeat'] is int) {
+        return json['heartbeat'] as int;
+      }
+      // Try plural 'heartbeats' array - use length as event count
+      if (json['heartbeats'] != null && json['heartbeats'] is List) {
+        final count = (json['heartbeats'] as List).length;
+        if (count > 0) {
+          // Calculate HR from event count: each beat event in 1 second = 60x per minute
+          return count * 60;
+        }
+      }
+      return 80; // Default normal HR
+    }
+
+    // Extract breath from either singular field or array length
+    int extractBreath(Map<String, dynamic> json) {
+      // Try singular 'breath' field first
+      if (json['breath'] != null && json['breath'] is int) {
+        return json['breath'] as int;
+      }
+      // Try plural 'breaths' array - use length as event count
+      if (json['breaths'] != null && json['breaths'] is List) {
+        final count = (json['breaths'] as List).length;
+        if (count > 0) {
+          // Calculate BR from event count: each breath event in 1 second = 60x per minute
+          return count * 60;
+        }
+      }
+      return 50; // Default normal BR
+    }
+
+    // Extract distance - convert from centimeters to meters
+    double extractDistance(Map<String, dynamic> json) {
+      dynamic distanceValue = json['distance'] ?? json['distance_covered'];
+      if (distanceValue is num) {
+        // If distance is in centimeters, convert to meters
+        return distanceValue.toDouble() / 100.0;
+      }
+      return 0.0;
+    }
+
     return Report(
-      deviceId: json['device_id'] as int,
-      heartbeat: json['heartbeat'] as int,
-      breath: json['breath'] as int,
-      systolicBp: json['systolic_bp'] as int,
-      diastolicBp: json['diastolic_bp'] as int,
-      bloodOxygen: json['blood_oxygen'] as int,
-      temperature: (json['temperature'] as num).toDouble(),
-      distanceCovered: (json['distance_covered'] as num).toDouble(),
-      timestamp: DateTime.parse(json['timestamp'] as String),
+      deviceId: (json['device_id'] as int?) ?? 0,
+      heartbeat: extractHeartbeat(json),
+      breath: extractBreath(json),
+      systolicBp: (json['systolic_bp'] as int?) ?? 120,
+      diastolicBp: (json['diastolic_bp'] as int?) ?? 80,
+      bloodOxygen: (json['blood_oxygen'] as int?) ?? 98,
+      temperature: ((json['temperature'] as num?) ?? 37.0).toDouble(),
+      distanceCovered: extractDistance(json),
+      timestamp: parseTimestamp(json['timestamp']),
     );
   }
 
@@ -45,13 +106,30 @@ class Report {
     int bloodOxygen = 98,
     double temperature = 37.0,
   }) {
-    final heartbeat = proto.heartbeats.length;
-    final breath = proto.breaths.length;
-    final distanceCm = proto.distance;
+    // Handle null fields with sensible defaults
+    final deviceId = proto.deviceId ?? 0;
+    
+    // If heartbeats/breaths arrays have count, use that; otherwise use realistic defaults
+    // The proto likely sends event counts in these fields
+    final heartbeat = (proto.heartbeats != null && proto.heartbeats!.isNotEmpty) 
+        ? proto.heartbeats!.length 
+        : 80; // Default normal HR
+    
+    final breath = (proto.breaths != null && proto.breaths!.isNotEmpty)
+        ? proto.breaths!.length
+        : 50; // Default normal BR
+    
+    final distanceCm = (proto.distance ?? 0).toInt();
     final distanceM = distanceCm / 100.0; // Convert cm to meters
+    final timestampMs = (proto.timestamp ?? 0).toInt();
+    
+    // Ensure we have a valid timestamp
+    final timestamp = timestampMs > 0 
+        ? DateTime.fromMillisecondsSinceEpoch(timestampMs)
+        : DateTime.now();
     
     return Report(
-      deviceId: proto.deviceId,
+      deviceId: deviceId,
       heartbeat: heartbeat,
       breath: breath,
       systolicBp: systolicBp,
@@ -59,15 +137,21 @@ class Report {
       bloodOxygen: bloodOxygen,
       temperature: temperature,
       distanceCovered: distanceM,
-      timestamp: DateTime.fromMillisecondsSinceEpoch(proto.timestamp.toInt()),
+      timestamp: timestamp,
     );
   }
 
   /// Convert from protobuf EventBasedReport (vital changes)
   /// Event ID: 1 = BP, 2 = O2, 3 = Temperature
   factory Report.fromEventBasedReport(pb.EventBasedReport proto, Report lastReport) {
+    final deviceId = proto.deviceId ?? lastReport.deviceId;
+    final timestamp = (proto.timestamp ?? 0) > 0
+        ? DateTime.fromMillisecondsSinceEpoch((proto.timestamp ?? 0).toInt())
+        : DateTime.now();
+    final eventData = proto.eventData ?? [];
+    
     Report result = Report(
-      deviceId: proto.deviceId,
+      deviceId: deviceId,
       heartbeat: lastReport.heartbeat,
       breath: lastReport.breath,
       systolicBp: lastReport.systolicBp,
@@ -75,24 +159,24 @@ class Report {
       bloodOxygen: lastReport.bloodOxygen,
       temperature: lastReport.temperature,
       distanceCovered: lastReport.distanceCovered,
-      timestamp: DateTime.fromMillisecondsSinceEpoch(proto.timestamp.toInt()),
+      timestamp: timestamp,
     );
 
     // Update based on event type
-    if (proto.eventId == 1 && proto.eventData.length == 2) {
+    if (proto.eventId == 1 && eventData.length == 2) {
       // Blood Pressure: [systolic, diastolic]
       result = Report(
         deviceId: result.deviceId,
         heartbeat: result.heartbeat,
         breath: result.breath,
-        systolicBp: proto.eventData[0],
-        diastolicBp: proto.eventData[1],
+        systolicBp: eventData[0],
+        diastolicBp: eventData[1],
         bloodOxygen: result.bloodOxygen,
         temperature: result.temperature,
         distanceCovered: result.distanceCovered,
         timestamp: result.timestamp,
       );
-    } else if (proto.eventId == 2 && proto.eventData.length >= 1) {
+    } else if (proto.eventId == 2 && eventData.length >= 1) {
       // Blood Oxygen
       result = Report(
         deviceId: result.deviceId,
@@ -100,14 +184,14 @@ class Report {
         breath: result.breath,
         systolicBp: result.systolicBp,
         diastolicBp: result.diastolicBp,
-        bloodOxygen: proto.eventData[0],
+        bloodOxygen: eventData[0],
         temperature: result.temperature,
         distanceCovered: result.distanceCovered,
         timestamp: result.timestamp,
       );
-    } else if (proto.eventId == 3 && proto.eventData.length >= 1) {
+    } else if (proto.eventId == 3 && eventData.length >= 1) {
       // Temperature (stored as tenths of degree, e.g., 375 = 37.5°C)
-      final tempTenths = proto.eventData[0];
+      final tempTenths = eventData[0];
       result = Report(
         deviceId: result.deviceId,
         heartbeat: result.heartbeat,
