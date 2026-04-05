@@ -37,25 +37,30 @@ class RunnerDetailProvider extends ChangeNotifier {
       
       _isConnected = isConnected;
       
-      // When connection is lost, stop the update timer immediately
-      if (!isConnected) {
-        _refreshTimer?.cancel();
-        _refreshTimer = null;
-        final wasActive = _activeRunners.contains(deviceId);
-        _activeRunners.remove(deviceId);
-        if (wasActive) {
-          // Removed from active updates
+      // Defer state updates to avoid "widget tree locked" error during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_disposed) return;
+        
+        // When connection is lost, stop the update timer immediately
+        if (!isConnected) {
+          _refreshTimer?.cancel();
+          _refreshTimer = null;
+          final wasActive = _activeRunners.contains(deviceId);
+          _activeRunners.remove(deviceId);
+          if (wasActive) {
+            // Removed from active updates
+          }
+          _activeRunnersNotifier.value = _activeRunners.length;
+        } 
+        // When connection is restored and we're visible, restart the timer
+        else if (isConnected && _isVisible) {
+          _activeRunners.add(deviceId);
+          _startTimerIfNeeded();
+          _activeRunnersNotifier.value = _activeRunners.length;
         }
-        _activeRunnersNotifier.value = _activeRunners.length;
-      } 
-      // When connection is restored and we're visible, restart the timer
-      else if (isConnected && _isVisible) {
-        _activeRunners.add(deviceId);
-        _startTimerIfNeeded();
-        _activeRunnersNotifier.value = _activeRunners.length;
-      }
-      
-      notifyListeners();
+        
+        notifyListeners();
+      });
     });
   }
 
@@ -119,14 +124,20 @@ class RunnerDetailProvider extends ChangeNotifier {
     }
     _isVisible = true;
     final actuallyConnected = webSocketService.isConnected;
-    if (actuallyConnected) {
-      _activeRunners.add(deviceId);
-      _startTimerIfNeeded();
-      _activeRunnersNotifier.value = _activeRunners.length;
-      notifyListeners();
-    } else {
-      notifyListeners();
-    }
+    
+    // Defer state updates to avoid "widget tree locked" error during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_disposed) return;
+      
+      if (actuallyConnected) {
+        _activeRunners.add(deviceId);
+        _startTimerIfNeeded();
+        _activeRunnersNotifier.value = _activeRunners.length;
+        notifyListeners();
+      } else {
+        notifyListeners();
+      }
+    });
   }
 
   @override
