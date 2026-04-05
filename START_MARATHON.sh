@@ -42,17 +42,13 @@ for service in zookeeper kafka data-generator; do
 done
 echo "   ✓ All services are running"
 
-# Build Flutter app if needed
+# Build Flutter app every time to ensure consistency
 echo ""
-echo "🔨 Preparing Flutter app..."
+echo "🔨 Rebuilding Flutter app (fresh build on every start)..."
 cd "$FRONTEND_DIR"
-if [ ! -f "$BUILD_DIR" ]; then
-    echo "   📦 Building release binary (first run)..."
-    flutter build linux --release -v
-    echo "   ✓ Build complete"
-else
-    echo "   ✓ Binary already built"
-fi
+echo "   📦 Building release binary..."
+flutter build linux --release -v
+echo "   ✓ Build complete"
 
 # Start Flutter app
 echo ""
