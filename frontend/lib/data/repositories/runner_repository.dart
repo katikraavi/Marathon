@@ -19,6 +19,9 @@ class RunnerRepository extends ChangeNotifier {
   late bool _cachedAscending = false;
   late Map<HealthState, int> _cachedHealthDistribution = {};
   late DateTime _lastCacheTime = DateTime.now();
+  
+  // Track disposal to prevent notifications after dispose
+  bool _isDisposed = false;
 
   Map<int, RunnerData> get runners => _runners;
   
@@ -109,7 +112,11 @@ class RunnerRepository extends ChangeNotifier {
     
     // Invalidate caches and notify listeners once for entire batch
     _invalidateCaches();
-    notifyListeners();
+    
+    // Only notify if not disposed (prevents errors after dispose)
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
   
   void _invalidateCaches() {
@@ -136,7 +143,9 @@ class RunnerRepository extends ChangeNotifier {
   void clear() {
     _runners.clear();
     _previousHealthStatus.clear();
-    notifyListeners();
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
 
   int get runnerCount => _runners.length;
@@ -167,6 +176,7 @@ class RunnerRepository extends ChangeNotifier {
   
   @override
   void dispose() {
+    _isDisposed = true;
     _batchTimer?.cancel();
     super.dispose();
   }

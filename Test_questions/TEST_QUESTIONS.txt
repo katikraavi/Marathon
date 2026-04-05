@@ -35,28 +35,33 @@ PARTICIPANT LIST & SORTING/FILTERING
 
 10. Participant list can be filtered by current health state +
 
-11. Health state is determined and calculated from wearable devices' vitals reports
+11. Health state is determined and calculated from wearable devices' vitals reports +
 
 
 HEALTH STATE & NOTIFICATIONS
 =============================
 
-12. If any runner has 2 or more health warnings concurrently, their current health state becomes an emergency
+12. If any runner has 2 or more health warnings concurrently, 
+their current health state becomes an emergency +
 
-13. Application features real-time system push notifications when any runner enters a health warning or health emergency state
+13. Application features real-time system push notifications 
+when any runner enters a health warning or health emergency state +
 
 
 HEALTH OBSERVATIONS PAGE
 ========================
 
-14. Application has a health observations page for each individual runner
+14. Application has a health observations page for each individual runner +
 
-15. Page features runner's most up-to-date marathon and health data
-    - Verify that page shows current heartbeats and breaths per minute, track distance covered, current health state, and time to which data corresponds.
+15. Page features runner's most up-to-date marathon and health data +
+    - Verify that page shows current heartbeats and breaths per minute, 
+    track distance covered, current health state, and time to which data corresponds.
 
-16. Page features line chart with data points showcasing change of heartbeats-per-minute health parameter
+16. Page features line chart with data points showcasing +
+change of heartbeats-per-minute health parameter
 
-17. Page features line chart with data points showcasing change of breaths-per-minute health parameter
+17. Page features line chart with data points showcasing +
+change of breaths-per-minute health parameter
 
 
 CHARTS & REAL-TIME UPDATES
@@ -64,13 +69,16 @@ CHARTS & REAL-TIME UPDATES
 
 18. Charts display data over last 10 minutes of the race
 
-19. Charts are updated in real-time according to wearable devices' reports
+19. Charts are updated in real-time according to wearable devices' reports +
 
-20. Page has a list of blood pressure/blood oxygen/temperature changes if they ever happen with the individual runner
+20. Page has a list of blood pressure/blood oxygen/temperature changes +
+if they ever happen with the individual runner
 
-21. Application displays real-time data updates from the reports only for the widgets that are currently in view on screen
+21. Application displays real-time data updates from the reports only 
+for the widgets that are currently in view on screen
 
-22. In case of errors or exceptions the messenger reloads whenever possible to the last stable state
+22. In case of errors or exceptions the messenger reloads whenever 
+possible to the last stable state
 
 
 EXTRA REQUIREMENTS

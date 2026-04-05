@@ -29,6 +29,24 @@ flutter run
 # Choose target: Android Emulator (a), iOS Simulator (i), or Physical Device
 ```
 
+### ⚡ Run from APK (No Flutter Required - Easiest!)
+
+**For users who don't have Flutter installed:**
+
+```bash
+# 1. Download APK from: https://github.com/your-org/Marathon/releases
+# 2. Save as: ~/Marathon/app-release.apk
+# 3. Run ONE command:
+./setup-apk.sh
+
+# 4. Follow the instructions to install on:
+#    - Android Emulator (recommended - lightweight)
+#    - Physical Android Device (via USB or WiFi)
+#    - Browser Emulator (Appetize.io - zero installation)
+```
+
+**Full guide:** 📄 [APK Setup Instructions](SETUP_APK_CONNECTION.md)
+
 ---
 
 ## 📋 What This App Does

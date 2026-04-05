@@ -6,6 +6,8 @@ import '../../data/repositories/runner_repository.dart';
 import '../../presentation/providers/runner_detail_provider.dart';
 import '../../data/models/health_state.dart';
 import '../../data/models/runner_data.dart';
+import '../../data/sources/websocket_source.dart';
+import '../../presentation/widgets/global_status_bar.dart';
 
 class RunnerDetailScreen extends StatefulWidget {
   final int deviceId;
@@ -21,8 +23,9 @@ class RunnerDetailScreen extends StatefulWidget {
   State<RunnerDetailScreen> createState() => _RunnerDetailScreenState();
 }
 
-class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
+class _RunnerDetailScreenState extends State<RunnerDetailScreen> with WidgetsBindingObserver {
   late RunnerDetailProvider _detailProvider;
+  AppLifecycleState? _lastLifecycleState;
 
   @override
   void initState() {
@@ -30,13 +33,34 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
     _detailProvider = RunnerDetailProvider(
       repository: widget.repository,
       deviceId: widget.deviceId,
+      webSocketService: context.read<WebSocketService>(),
     );
+    // Start updates when screen is created
+    _detailProvider.resumeUpdates();
+    // Listen to app lifecycle changes
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    // Pause updates when screen is destroyed
+    _detailProvider.pauseUpdates();
     _detailProvider.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Pause updates when app goes to background
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      _detailProvider.pauseUpdates();
+    }
+    // Resume updates when app returns to foreground
+    else if (state == AppLifecycleState.resumed) {
+      _detailProvider.resumeUpdates();
+    }
+    _lastLifecycleState = state;
   }
 
   @override
@@ -45,16 +69,48 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> {
       value: _detailProvider,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(
-            'Runner #${widget.deviceId}',
-            style: const TextStyle(fontSize: 16),
+          title: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                'Runner #${widget.deviceId}',
+                style: const TextStyle(fontSize: 16),
+              ),
+              Consumer<RunnerDetailProvider>(
+                builder: (context, provider, _) {
+                  final status = provider.isPaused ? '⏸️ PAUSED' : '🟢 UPDATING';
+                  final color = provider.isPaused ? Colors.grey : Colors.green;
+                  return Text(
+                    '$status · Updates: ${provider.updateCount}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: color,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
           centerTitle: true,
-          toolbarHeight: 40,
+          toolbarHeight: 50,
         ),
-        body: _DetailBody(
-          detailProvider: _detailProvider,
-          deviceId: widget.deviceId,
+        body: Column(
+          children: [
+            // Global Status Bar - shows which runner is updating
+            GlobalStatusBar(
+              activeRunnerId: widget.deviceId,
+              totalRunners: context.read<RunnerRepository>().runnerCount,
+            ),
+            // Detail content
+            Expanded(
+              child: _DetailBody(
+                detailProvider: _detailProvider,
+                deviceId: widget.deviceId,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -146,14 +202,10 @@ class _DetailBodyState extends State<_DetailBody> {
                             ],
                           ),
                           const SizedBox(height: 1),
-                          GridView.count(
-                            crossAxisCount: 3,
-                            crossAxisSpacing: 2,
-                            mainAxisSpacing: 0,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            childAspectRatio: 0.55,
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: health.vitalDetails.map((detail) {
+                              final cellWidth = (MediaQuery.of(context).size.width - 42) / 6;
                               final statusColor = detail.status == HealthState.normal
                                   ? Colors.green
                                   : detail.status == HealthState.warning
@@ -179,29 +231,31 @@ class _DetailBodyState extends State<_DetailBody> {
                                 }
                               }
 
-                              return Padding(
-                                padding: const EdgeInsets.only(left: 2),
-                                child: Container(
-                                  padding: const EdgeInsets.only(left: 2, right: 2, top: 1, bottom: 1),
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                      left: BorderSide(color: statusColor, width: 2),
+                              return SizedBox(
+                                width: cellWidth,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 2),
+                                  child: Container(
+                                    padding: const EdgeInsets.only(left: 2, right: 2, top: 1, bottom: 1),
+                                    decoration: BoxDecoration(
+                                      border: Border(
+                                        left: BorderSide(color: statusColor, width: 2),
+                                      ),
                                     ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
                                       // Icon and name
                                       Row(
                                         children: [
-                                          Icon(getIcon(detail.name), size: 10, color: statusColor),
+                                          Icon(getIcon(detail.name), size: 18, color: statusColor),
                                           const SizedBox(width: 1),
                                           Expanded(
                                             child: Text(
                                               detail.name,
                                               style: const TextStyle(
-                                                fontSize: 8,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.w600,
                                               ),
                                               maxLines: 1,
@@ -215,10 +269,10 @@ class _DetailBodyState extends State<_DetailBody> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            'Value',
+                                            'Current',
                                             style: TextStyle(
-                                              fontSize: 5,
-                                              color: Colors.grey.shade600,
+                                              fontSize: 10,
+                                              color: Colors.grey.shade500,
                                             ),
                                           ),
                                           RichText(
@@ -227,7 +281,7 @@ class _DetailBodyState extends State<_DetailBody> {
                                                 TextSpan(
                                                   text: detail.value,
                                                   style: TextStyle(
-                                                    fontSize: 8,
+                                                    fontSize: 16,
                                                     fontWeight: FontWeight.bold,
                                                     color: statusColor,
                                                   ),
@@ -235,7 +289,7 @@ class _DetailBodyState extends State<_DetailBody> {
                                                 TextSpan(
                                                   text: ' ${detail.unit}',
                                                   style: TextStyle(
-                                                    fontSize: 5,
+                                                    fontSize: 12,
                                                     color: Colors.grey.shade600,
                                                   ),
                                                 ),
@@ -251,16 +305,9 @@ class _DetailBodyState extends State<_DetailBody> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            'Normal',
-                                            style: TextStyle(
-                                              fontSize: 5,
-                                              color: Colors.grey.shade600,
-                                            ),
-                                          ),
-                                          Text(
                                             detail.normalRange,
                                             style: const TextStyle(
-                                              fontSize: 5,
+                                              fontSize: 13,
                                               fontWeight: FontWeight.w600,
                                               color: Colors.green,
                                             ),
@@ -272,34 +319,33 @@ class _DetailBodyState extends State<_DetailBody> {
                                       // Status badge
                                       Container(
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 2,
-                                          vertical: 0,
+                                          horizontal: 4,
+                                          vertical: 2,
                                         ),
                                         decoration: BoxDecoration(
                                           color: statusColor,
-                                          borderRadius: BorderRadius.circular(2),
+                                          borderRadius: BorderRadius.circular(3),
                                         ),
                                         child: Text(
                                           detail.status.toString().split('.').last.toUpperCase(),
                                           style: const TextStyle(
-                                            fontSize: 5,
+                                            fontSize: 12,
                                             fontWeight: FontWeight.bold,
                                             color: Colors.white,
                                           ),
                                         ),
                                       ),
-                                    ],
-                                  ),
+                                    ],                                    ),                                  ),
                                 ),
                               );
                             }).toList(),
                           ),
-                          const SizedBox(height: 1),
+                        const SizedBox(height: 24),
                           if (runner.lastUpdateTime != null)
                             Text(
                               'Updated: ${DateFormat('HH:mm:ss').format(runner.lastUpdateTime!)} • ${health.reason}',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 12,
                                 color: healthColor,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -316,13 +362,13 @@ class _DetailBodyState extends State<_DetailBody> {
                                 ),
                                 child: const Row(
                                   children: [
-                                    Icon(Icons.check_circle, size: 12, color: Colors.green),
+                                    Icon(Icons.check_circle, size: 14, color: Colors.green),
                                     SizedBox(width: 2),
                                     Expanded(
                                       child: Text(
                                         'All vitals within normal ranges',
                                         style: TextStyle(
-                                          fontSize: 8,
+                                          fontSize: 14,
                                           color: Colors.green,
                                           fontWeight: FontWeight.w600,
                                         ),
@@ -366,6 +412,7 @@ class _DetailBodyState extends State<_DetailBody> {
                           normalMax: 150,
                           warningMin: 40,
                           warningMax: 170,
+                          unit: 'BPM',
                         ),
                         const SizedBox(height: 6),
                         Text(
@@ -383,6 +430,7 @@ class _DetailBodyState extends State<_DetailBody> {
                           normalMax: 60,
                           warningMin: 25,
                           warningMax: 85,
+                          unit: 'Breaths/min',
                         ),
                       ],
                     ),
@@ -395,7 +443,7 @@ class _DetailBodyState extends State<_DetailBody> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Changes',
+                          'Changes (${detailProvider.vitalEvents.length})',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -415,15 +463,28 @@ class _DetailBodyState extends State<_DetailBody> {
                             itemCount: detailProvider.vitalEvents.length,
                             itemBuilder: (context, index) {
                               final event = detailProvider.vitalEvents[index];
+                              final statusColor = _getStatusColor(event.type);
                               return ListTile(
                                 contentPadding: const EdgeInsets.symmetric(vertical: 2, horizontal: 0),
                                 dense: true,
                                 leading: Icon(
-                                  _getEventIcon(event.type),
-                                  color: Colors.blue,
+                                  _getStatusIcon(event.type),
+                                  color: statusColor,
+                                  size: 20,
                                 ),
-                                title: Text(event.type),
-                                subtitle: Text(event.value),
+                                title: Text(
+                                  event.type,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: statusColor,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  event.value,
+                                  style: TextStyle(
+                                    color: Colors.grey.shade700,
+                                  ),
+                                ),
                                 trailing: Text(
                                   event.formattedTime,
                                   style: Theme.of(context).textTheme.labelSmall,
@@ -467,6 +528,28 @@ class _DetailBodyState extends State<_DetailBody> {
       case HealthState.emergency:
         return Colors.red;
     }
+  }
+
+  Color _getStatusColor(String eventType) {
+    if (eventType.contains('EMERGENCY')) {
+      return Colors.red;
+    } else if (eventType.contains('WARNING')) {
+      return Colors.orange;
+    } else if (eventType.contains('NORMAL')) {
+      return Colors.green;
+    }
+    return Colors.blue;
+  }
+
+  IconData _getStatusIcon(String eventType) {
+    if (eventType.contains('EMERGENCY')) {
+      return Icons.warning_amber_rounded;
+    } else if (eventType.contains('WARNING')) {
+      return Icons.info_rounded;
+    } else if (eventType.contains('NORMAL')) {
+      return Icons.check_circle_rounded;
+    }
+    return Icons.info;
   }
 }
 
@@ -560,6 +643,7 @@ class _VitalChart extends StatelessWidget {
   final int normalMax;
   final int warningMin;
   final int warningMax;
+  final String unit;
 
   const _VitalChart({
     required this.data,
@@ -567,6 +651,7 @@ class _VitalChart extends StatelessWidget {
     required this.normalMax,
     required this.warningMin,
     required this.warningMax,
+    required this.unit,
   });
 
   @override
@@ -588,45 +673,64 @@ class _VitalChart extends StatelessWidget {
     final minY = ((data.map((d) => d.y).reduce((a, b) => a < b ? a : b) * 0.9).clamp(0, double.infinity)) as double;
 
     return Container(
-      height: 120,
+      height: 220,
+      margin: const EdgeInsets.only(right: 16, bottom: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: Colors.grey.shade300),
         borderRadius: BorderRadius.circular(3),
       ),
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
       child: LineChart(
         LineChartData(
           minX: 0,
-          maxX: data.last.x,
+          maxX: 600, // 10 minutes in seconds
           minY: minY,
           maxY: maxY,
           lineTouchData: LineTouchData(enabled: true),
           gridData: FlGridData(
             show: true,
-            drawVerticalLine: false,
+            drawVerticalLine: true,
+            verticalInterval: 120, // Vertical lines every 2 minutes
+            getDrawingVerticalLine: (value) {
+              return FlLine(
+                color: Colors.grey.shade200,
+                strokeWidth: 1,
+              );
+            },
             horizontalInterval: (maxY - minY) / 5,
           ),
           titlesData: FlTitlesData(
             bottomTitles: AxisTitles(
+              axisNameWidget: const Text(
+                'Time (min)',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
+              ),
+              axisNameSize: 18,
               sideTitles: SideTitles(
                 showTitles: true,
-                interval: data.length > 50 ? (data.last.x / 5) : null,
+                interval: 120, // Show tick every 2 minutes
                 getTitlesWidget: (value, meta) {
+                  final minutes = (value / 60).toInt();
                   return Text(
-                    value.toInt().toString(),
-                    style: const TextStyle(fontSize: 10),
+                    '$minutes min',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
                   );
                 },
               ),
             ),
             leftTitles: AxisTitles(
+              axisNameWidget: Text(
+                unit,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              axisNameSize: 18,
               sideTitles: SideTitles(
                 showTitles: true,
                 getTitlesWidget: (value, meta) {
                   return Text(
                     value.toInt().toString(),
-                    style: const TextStyle(fontSize: 10),
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
                   );
                 },
               ),
@@ -648,28 +752,64 @@ class _VitalChart extends StatelessWidget {
           ],
           extraLinesData: ExtraLinesData(
             horizontalLines: [
+              // Normal range - Green (solid line)
               HorizontalLine(
                 y: normalMin.toDouble(),
-                color: Colors.green.withOpacity(0.3),
-                strokeWidth: 1,
-                dashArray: [5, 5],
+                color: Colors.green.withOpacity(0.8),
+                strokeWidth: 3,
                 label: HorizontalLineLabel(
                   show: true,
                   alignment: Alignment.topRight,
-                  labelResolver: (_) => 'Normal Min',
-                  style: const TextStyle(fontSize: 9),
+                  labelResolver: (_) => 'Normal',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.green),
                 ),
               ),
               HorizontalLine(
                 y: normalMax.toDouble(),
-                color: Colors.green.withOpacity(0.3),
-                strokeWidth: 1,
-                dashArray: [5, 5],
+                color: Colors.green.withOpacity(0.8),
+                strokeWidth: 3,
+                label: HorizontalLineLabel(
+                  show: false,
+                ),
+              ),
+              // Warning range - Orange (solid line)
+              HorizontalLine(
+                y: warningMin.toDouble(),
+                color: Colors.orange.withOpacity(0.8),
+                strokeWidth: 3,
+                label: HorizontalLineLabel(
+                  show: true,
+                  alignment: Alignment.topRight,
+                  labelResolver: (_) => 'Warning',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.orange),
+                ),
+              ),
+              HorizontalLine(
+                y: warningMax.toDouble(),
+                color: Colors.orange.withOpacity(0.8),
+                strokeWidth: 3,
+                label: HorizontalLineLabel(
+                  show: false,
+                ),
+              ),
+              // Emergency - Red (solid line at warning boundaries)
+              HorizontalLine(
+                y: warningMin.toDouble(),
+                color: Colors.red.withOpacity(0.6),
+                strokeWidth: 2,
                 label: HorizontalLineLabel(
                   show: true,
                   alignment: Alignment.bottomRight,
-                  labelResolver: (_) => 'Normal Max',
-                  style: const TextStyle(fontSize: 9),
+                  labelResolver: (_) => 'Emergency',
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.red),
+                ),
+              ),
+              HorizontalLine(
+                y: warningMax.toDouble(),
+                color: Colors.red.withOpacity(0.6),
+                strokeWidth: 2,
+                label: HorizontalLineLabel(
+                  show: false,
                 ),
               ),
             ],

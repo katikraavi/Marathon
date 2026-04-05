@@ -29,7 +29,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     tty: true
     stdin_open: true
-    command: bash -c "while true; do pkill -f 'producer|client' 2>/dev/null || true; sleep 1; echo 'Starting data generator...'; ./producer & sleep 3 && ./client; sleep 5; done"
-    restart: unless-stopped
+    command: bash -c "./producer &  sleep 10 && exec ./client"
+    restart: no
     ports:
       - "8080:8080"

@@ -4,8 +4,11 @@ import '../../data/models/health_state.dart';
 import '../../data/repositories/runner_repository.dart';
 import '../../data/models/runner_data.dart';
 import '../../presentation/providers/runners_provider.dart';
+import '../../presentation/providers/runner_detail_provider.dart';
 import '../../data/sources/websocket_source.dart';
 import '../../services/notification_service.dart';
+import '../../presentation/widgets/global_status_bar.dart';
+import '../../main.dart' show scaffoldMessengerKey;
 import 'runner_detail_screen.dart';
 
 class RaceListScreen extends StatefulWidget {
@@ -15,14 +18,20 @@ class RaceListScreen extends StatefulWidget {
   State<RaceListScreen> createState() => _RaceListScreenState();
 }
 
-class _RaceListScreenState extends State<RaceListScreen> {
+class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObserver {
   late WebSocketService _webSocketService;
   late RunnerRepository _repository;
   bool _isConnected = false;
+  AppLifecycleState? _lastLifecycleState;
+  
+  // Track previous health states locally to detect changes
+  final Map<int, HealthState> _previousStates = {};
 
   @override
   void initState() {
     super.initState();
+    // Listen to app lifecycle changes for visibility-based updates
+    WidgetsBinding.instance.addObserver(this);
     _initializeServices();
   }
 
@@ -32,7 +41,6 @@ class _RaceListScreenState extends State<RaceListScreen> {
       _repository = context.read<RunnerRepository>();
       _webSocketService = context.read<WebSocketService>();
     } catch (e) {
-      print('[ERROR] Failed to read global services: $e');
       // Fallback: create new services if global ones aren't available
       _repository = RunnerRepository();
       _webSocketService = WebSocketService();
@@ -47,6 +55,34 @@ class _RaceListScreenState extends State<RaceListScreen> {
     });
   }
 
+  void _showAlert(int deviceId, String reason, HealthState state) {
+    try {
+      final isEmergency = state == HealthState.emergency;
+      final scaffoldMessenger = scaffoldMessengerKey.currentState;
+      
+      if (scaffoldMessenger != null) {
+        scaffoldMessenger.clearSnackBars();
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '${isEmergency ? '🚨 EMERGENCY' : '⚠️ WARNING'}: Runner #$deviceId - $reason',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            backgroundColor: isEmergency ? Colors.red : Colors.orange,
+            duration: Duration(seconds: isEmergency ? 6 : 5),
+            dismissDirection: DismissDirection.horizontal,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+          ),
+        );
+      } else {
+        // Silently skip if MessengerState not available
+      }
+    } catch (e) {
+      // Silently handle any errors showing alerts
+    }
+  }
+
   void _setupListeners() {
     try {
       // Update connection status from WebSocket
@@ -57,37 +93,74 @@ class _RaceListScreenState extends State<RaceListScreen> {
       });
 
       // Listen to reports and handle notifications
-      _webSocketService.reportStream.listen((report) {
-        // Check for health state changes and show notifications
-        if (_repository.hasHealthStateChanged(report.deviceId)) {
-          final runner = _repository.getRunner(report.deviceId);
-          if (runner != null) {
+      final subscription = _webSocketService.reportStream.listen((report) {
+        
+        // Check for health state changes by comparing with our local tracking
+        final runner = _repository.getRunner(report.deviceId);
+        
+        if (runner != null) {
+          final currentState = runner.healthStatus.state;
+          final previousState = _previousStates[report.deviceId];
+          final hasChanged = previousState != null && previousState != currentState;
+          
+          // First time seeing this device or state changed
+          if (previousState == null) {
+            _previousStates[report.deviceId] = currentState;
+          } else if (hasChanged) {
+            
             final healthStatus = runner.healthStatus;
             final notificationService = NotificationService();
 
-            if (healthStatus.state == HealthState.emergency) {
-              notificationService.showEmergencyAlert(
-                runnerId: report.deviceId,
-                reason: 'Emergency: Runner ${report.deviceId} is ill. ${healthStatus.reason}',
-              );
-            } else if (healthStatus.state == HealthState.warning) {
-              notificationService.showWarningAlert(
-                runnerId: report.deviceId,
-                reason: 'Warning: Runner ${report.deviceId} is at risk. ${healthStatus.reason}',
-              );
+            try {
+              if (currentState == HealthState.emergency) {
+                notificationService.showEmergencyAlert(
+                  runnerId: report.deviceId,
+                  reason: 'Emergency: Runner ${report.deviceId} is ill. ${healthStatus.reason}',
+                );
+                // Show in-app alert for web and visibility
+                _showAlert(report.deviceId, healthStatus.reason, HealthState.emergency);
+              } else if (currentState == HealthState.warning) {
+                notificationService.showWarningAlert(
+                  runnerId: report.deviceId,
+                  reason: 'Warning: Runner ${report.deviceId} is at risk. ${healthStatus.reason}',
+                );
+                // Show in-app alert for web and visibility
+                _showAlert(report.deviceId, healthStatus.reason, HealthState.warning);
+              }
+            } catch (e) {
+              // Still show in-app alert even if notification service fails
+              _showAlert(report.deviceId, healthStatus.reason, currentState);
             }
+            
+            // Update tracked state after processing
+            _previousStates[report.deviceId] = currentState;
           }
         }
       });
     } catch (e) {
-      print('[ERROR] Failed to setup listeners: $e');
+      // Silently handle listener setup errors
     }
   }
 
   @override
   void dispose() {
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
     // Don't dispose global services - they should keep running
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Pause expensive operations when app goes to background
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      // Repository will reduce update frequency when not visible
+    }
+    // Resume normal operations when app returns to foreground
+    else if (state == AppLifecycleState.resumed) {
+      setState(() {}); // Refresh list when app comes back to foreground
+    }
+    _lastLifecycleState = state;
   }
 
   @override
@@ -137,6 +210,16 @@ class _RaceListScreenState extends State<RaceListScreen> {
         ),
         body: Column(
           children: [
+            // Global Status Bar - shows update status for all runners
+            Consumer<RunnersProvider>(
+              builder: (context, provider, _) {
+                return GlobalStatusBar(
+                  activeRunnerId: null, // null when viewing list
+                  totalRunners: provider.totalRunners,
+                );
+              },
+            ),
+            
             // OPTIMIZATION: Separate Consumer for control bar (stats + filters)
             // This rebuilds independently from runner list
             _ControlBar(),
@@ -153,8 +236,15 @@ class _RaceListScreenState extends State<RaceListScreen> {
 
 /// OPTIMIZATION: Extracted control bar with stats and filters
 /// Rebuilds only when provider state changes, separate from list
-class _ControlBar extends StatelessWidget {
+class _ControlBar extends StatefulWidget {
   const _ControlBar({Key? key}) : super(key: key);
+
+  @override
+  State<_ControlBar> createState() => _ControlBarState();
+}
+
+class _ControlBarState extends State<_ControlBar> {
+  bool _showFilters = true;
 
   @override
   Widget build(BuildContext context) {
@@ -166,7 +256,6 @@ class _ControlBar extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Stats row - only rebuilds when health stats change
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
@@ -174,21 +263,37 @@ class _ControlBar extends StatelessWidget {
                     label: 'Total Runners',
                     value: runnersProvider.totalRunners.toString(),
                     color: Colors.blue,
+                    onTap: () {
+                      setState(() => _showFilters = !_showFilters);
+                      runnersProvider.setFilterState(null);
+                    },
                   ),
                   _StatCard(
                     label: 'Normal',
                     value: runnersProvider.normalCount.toString(),
                     color: Colors.green,
+                    onTap: () {
+                      setState(() => _showFilters = false);
+                      runnersProvider.setFilterState(HealthState.normal);
+                    },
                   ),
                   _StatCard(
                     label: 'Warning',
                     value: runnersProvider.warningCount.toString(),
                     color: Colors.orange,
+                    onTap: () {
+                      setState(() => _showFilters = false);
+                      runnersProvider.setFilterState(HealthState.warning);
+                    },
                   ),
                   _StatCard(
                     label: 'Emergency',
                     value: runnersProvider.emergencyCount.toString(),
                     color: Colors.red,
+                    onTap: () {
+                      setState(() => _showFilters = false);
+                      runnersProvider.setFilterState(HealthState.emergency);
+                    },
                   ),
                 ],
               ),
@@ -232,46 +337,50 @@ class _ControlBar extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
 
-              // Health state filters
-              Text(
-                'Filter by Health:',
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  FilterChip(
-                    label: const Text('All'),
-                    selected: runnersProvider.filterState == null,
-                    onSelected: (_) =>
-                        runnersProvider.setFilterState(null),
-                  ),
-                  FilterChip(
-                    label: const Text('Normal'),
-                    selected:
-                        runnersProvider.filterState == HealthState.normal,
-                    onSelected: (_) => runnersProvider
-                        .setFilterState(HealthState.normal),
-                  ),
-                  FilterChip(
-                    label: const Text('Warning'),
-                    selected:
-                        runnersProvider.filterState == HealthState.warning,
-                    onSelected: (_) => runnersProvider
-                        .setFilterState(HealthState.warning),
-                  ),
-                  FilterChip(
-                    label: const Text('Emergency'),
-                    selected: runnersProvider.filterState ==
-                        HealthState.emergency,
-                    onSelected: (_) => runnersProvider
-                        .setFilterState(HealthState.emergency),
-                  ),
-                ],
-              ),
+              // Show filters only if _showFilters is true
+              if (_showFilters) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Filter by Health:',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    FilterChip(
+                      label: const Text('All'),
+                      selected: runnersProvider.filterState == null,
+                      onSelected: (_) {
+                        setState(() => _showFilters = true);
+                        runnersProvider.setFilterState(null);
+                      },
+                    ),
+                    FilterChip(
+                      label: const Text('Normal'),
+                      selected:
+                          runnersProvider.filterState == HealthState.normal,
+                      onSelected: (_) => runnersProvider
+                          .setFilterState(HealthState.normal),
+                    ),
+                    FilterChip(
+                      label: const Text('Warning'),
+                      selected:
+                          runnersProvider.filterState == HealthState.warning,
+                      onSelected: (_) => runnersProvider
+                          .setFilterState(HealthState.warning),
+                    ),
+                    FilterChip(
+                      label: const Text('Emergency'),
+                      selected: runnersProvider.filterState ==
+                          HealthState.emergency,
+                      onSelected: (_) => runnersProvider
+                          .setFilterState(HealthState.emergency),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         );
@@ -311,6 +420,18 @@ class _RunnerListSection extends StatelessWidget {
                   Text(
                     'Loading runner data... (0/500)',
                     style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Waiting for connection...',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
                   ),
                 ],
               ),
@@ -450,16 +571,48 @@ class _RunnerListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      title: Text('Device ${runner.deviceId}'),
-      subtitle: Text(
-        'Distance: ${runner.distance.toStringAsFixed(2)}m',
-      ),
-      trailing: Icon(
-        _getHealthIcon(runner.healthStatus.state),
-        color: _getHealthColor(runner.healthStatus.state),
-      ),
-      onTap: onTap,
+    return ValueListenableBuilder<int>(
+      valueListenable: RunnerDetailProvider.activeRunnersNotifier,
+      builder: (context, _, __) {
+        // Rebuild when active runners change
+        final isActive = RunnerDetailProvider.isRunnerActive(runner.deviceId);
+        final statusText = isActive ? '🟢 UPDATING' : '⏸️ PAUSED';
+        final statusColor = isActive ? Colors.green : Colors.grey;
+        
+        return ListTile(
+          title: Row(
+            children: [
+              Expanded(
+                child: Text('Device ${runner.deviceId}'),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.2),
+                  border: Border.all(color: statusColor, width: 1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: statusColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          subtitle: Text(
+            'Distance: ${runner.distance.toStringAsFixed(2)}m',
+          ),
+          trailing: Icon(
+            _getHealthIcon(runner.healthStatus.state),
+            color: _getHealthColor(runner.healthStatus.state),
+          ),
+          onTap: onTap,
+        );
+      },
     );
   }
 
@@ -490,42 +643,48 @@ class _StatCard extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
+  final VoidCallback? onTap;
 
   const _StatCard({
     Key? key,
     required this.label,
     required this.value,
     required this.color,
+    this.onTap,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: color.withOpacity(0.1),
-          border: Border.all(color: color.withOpacity(0.3)),
-        ),
-        child: Column(
-          children: [
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelSmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: color,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+    final card = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: color.withOpacity(0.1),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: color,
+                ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+
+    return Expanded(
+      child: onTap != null
+          ? GestureDetector(onTap: onTap, child: card)
+          : card,
     );
   }
 }

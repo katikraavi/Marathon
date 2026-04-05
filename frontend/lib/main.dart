@@ -9,9 +9,13 @@ import 'data/sources/websocket_source.dart';
 // Global services that start loading data immediately
 late RunnerRepository _globalRepository;
 late WebSocketService _globalWebSocketService;
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  print('═══════════════════════════════════════════════════════════');
+  print('✓ Marathon Safety App Started');
+  print('═══════════════════════════════════════════════════════════');
   
   // Initialize notifications service
   await NotificationService().initialize();
@@ -19,6 +23,7 @@ void main() async {
   // Initialize global services and start loading data BEFORE showing UI
   _globalRepository = RunnerRepository();
   _globalWebSocketService = WebSocketService();
+  print('[Startup] Services initialized');
   
   // Start connecting to WebSocket immediately (data loads while user is on login screen)
   // Wrap in try-catch to prevent app crash if WebSocket fails
@@ -59,6 +64,7 @@ class MarathonSafetyApp extends StatelessWidget {
           primarySwatch: Colors.blue,
           useMaterial3: true,
         ),
+        scaffoldMessengerKey: scaffoldMessengerKey,
         home: const HomeScreen(),
         routes: {
           '/home': (context) => const HomeScreen(),

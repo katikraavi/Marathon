@@ -27,7 +27,7 @@ class WebSocketService {
   static const int maxReconnectAttempts = 5;
   static const Duration reconnectDelay = Duration(seconds: 3);
   static const Duration keepAliveInterval = Duration(seconds: 30);  // Ping every 30s
-  static const Duration stalenessThreshold = Duration(seconds: 90);  // Reconnect if no message for 90s
+  static const Duration stalenessThreshold = Duration(seconds: 10);  // Reconnect if no message for 10s (was 90s)
 
   Stream<Report> get reportStream => _reportStream.stream;
   Stream<String> get eventStream => _eventStream.stream;
@@ -39,14 +39,21 @@ class WebSocketService {
       return AppConstants.wsBaseUrlAndroid;
     } else if (Platform.isIOS) {
       return AppConstants.wsBaseUrlIOS;
+    } else if (Platform.isLinux) {
+      return AppConstants.wsBaseUrlLinux;
+    } else if (Platform.isMacOS) {
+      return AppConstants.wsBaseUrlMac;
+    } else if (Platform.isWindows) {
+      return AppConstants.wsBaseUrlWindows;
     }
-    // Default to localhost for other platforms (Windows, macOS, Linux)
+    // Default to localhost for web and other platforms
     return 'ws://localhost:8080';
   }
 
   Future<void> connect() async {
     try {
       print('[WebSocket] Attempting to connect to $_baseUrl');
+      print('[WebSocket] Platform check - isAndroid: ${Platform.isAndroid}, isIOS: ${Platform.isIOS}, isLinux: ${Platform.isLinux}');
       
       // Construct full WebSocket URLs
       final timeBasedUrl = '$_baseUrl${AppConstants.timeBasedReportsEndpoint}';
@@ -57,7 +64,12 @@ class WebSocketService {
 
       // Connect time-based reports FIRST (primary data source)
       try {
-        _timeBasedChannel = IOWebSocketChannel.connect(timeBasedUrl);
+        print('[WebSocket] Starting time-based connection...');
+        _timeBasedChannel = IOWebSocketChannel.connect(timeBasedUrl, headers: {
+          'Connection': 'Upgrade',
+          'Upgrade': 'websocket',
+          'Sec-WebSocket-Version': '13',
+        });
         await _timeBasedChannel.ready;
         print('[WebSocket] Time-based connection ready');
       } catch (e) {
@@ -144,8 +156,7 @@ class WebSocketService {
           if (!_reportStream.isClosed) {
             _reportStream.add(report);
           }
-          print('[WebSocket] Time-based report: Device ${report.deviceId}, '
-                'HR: ${report.heartbeat}, BR: ${report.breath}, Distance: ${report.distanceCovered}m');
+          
         } catch (e) {
           print('[WebSocket] Error parsing time-based report: $e');
         }
@@ -284,10 +295,10 @@ class WebSocketService {
   }
 
   /// Start staleness detection to identify broken connections early
-  /// If no message received for 90s, force reconnect
+  /// If no message received for 10s, force reconnect
   void _startStalenessCheck() {
     _stalenessCheckTimer?.cancel();
-    _stalenessCheckTimer = Timer.periodic(Duration(seconds: 30), (_) {
+    _stalenessCheckTimer = Timer.periodic(Duration(seconds: 5), (_) {
       if (!_isConnected) return;
       
       final timeSinceLastMessage = DateTime.now().difference(_lastMessageTime);
@@ -296,7 +307,7 @@ class WebSocketService {
         print('[WebSocket] Connection stale (no data for ${timeSinceLastMessage.inSeconds}s), '
               'forcing reconnect');
         _handleConnectionError();
-      } else if (timeSinceLastMessage.inSeconds > 45) {
+      } else if (timeSinceLastMessage.inSeconds > 5) {
         print('[WebSocket] Connection becoming stale (${timeSinceLastMessage.inSeconds}s since last message)');
       }
     });

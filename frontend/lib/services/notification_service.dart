@@ -81,42 +81,47 @@ class NotificationService {
     required String body,
     required NotificationSeverity severity,
   }) async {
-    final androidDetails = AndroidNotificationDetails(
-      AppConstants.notificationChannelId,
-      AppConstants.notificationChannelName,
-      channelDescription: AppConstants.notificationChannelDescription,
-      importance: severity == NotificationSeverity.emergency
-          ? Importance.max
-          : Importance.high,
-      priority: severity == NotificationSeverity.emergency
-          ? Priority.max
-          : Priority.high,
-      enableVibration: true,
-      playSound: true,
-      tag: 'runner_health_alert',
-      colorized: true,
-      color: severity == NotificationSeverity.emergency
-          ? const Color.fromARGB(255, 255, 0, 0)
-          : const Color.fromARGB(255, 255, 193, 7),
-    );
+    try {
+      final androidDetails = AndroidNotificationDetails(
+        AppConstants.notificationChannelId,
+        AppConstants.notificationChannelName,
+        channelDescription: AppConstants.notificationChannelDescription,
+        importance: severity == NotificationSeverity.emergency
+            ? Importance.max
+            : Importance.high,
+        priority: severity == NotificationSeverity.emergency
+            ? Priority.max
+            : Priority.high,
+        enableVibration: true,
+        playSound: true,
+        tag: 'runner_health_alert',
+        colorized: true,
+        color: severity == NotificationSeverity.emergency
+            ? const Color.fromARGB(255, 255, 0, 0)
+            : const Color.fromARGB(255, 255, 193, 7),
+      );
 
-    const iOSDetails = DarwinNotificationDetails(
-      presentSound: true,
-      presentBadge: true,
-      presentAlert: true,
-    );
+      const iOSDetails = DarwinNotificationDetails(
+        presentSound: true,
+        presentBadge: true,
+        presentAlert: true,
+      );
 
-    final notificationDetails = NotificationDetails(
-      android: androidDetails,
-      iOS: iOSDetails,
-    );
+      final notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iOSDetails,
+      );
 
-    await _plugin.show(
-      id,
-      title,
-      body,
-      notificationDetails,
-    );
+      await _plugin.show(
+        id,
+        title,
+        body,
+        notificationDetails,
+      );
+    } catch (e) {
+      // Notification service may not be available (e.g. Linux without DBus)
+      // In-app snackbars are shown anyway as fallback, so we silently ignore
+    }
   }
 
   Future<void> cancel(int id) async {

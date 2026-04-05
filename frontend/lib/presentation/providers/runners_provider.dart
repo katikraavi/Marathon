@@ -8,12 +8,18 @@ class RunnersProvider extends ChangeNotifier {
   String _sortBy = 'distance';
   bool _sortAscending = false;
   HealthState? _filterState;
+  bool _isDisposed = false;
+  late final VoidCallback _repositoryListener;
 
   RunnersProvider({required this.repository}) {
     // Listen to repository changes and propagate them
-    repository.addListener(() {
-      notifyListeners();
-    });
+    // Save the listener so we can remove it in dispose
+    _repositoryListener = () {
+      if (!_isDisposed) {
+        notifyListeners();
+      }
+    };
+    repository.addListener(_repositoryListener);
   }
 
   String get sortBy => _sortBy;
@@ -46,20 +52,33 @@ class RunnersProvider extends ChangeNotifier {
 
   void setSortBy(String sortBy) {
     _sortBy = sortBy;
-    notifyListeners();
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
 
   void setSortAscending(bool ascending) {
     _sortAscending = ascending;
-    notifyListeners();
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
 
   void setFilterState(HealthState? state) {
     _filterState = state;
-    notifyListeners();
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
 
   RunnerData? getRunner(int deviceId) {
     return repository.getRunner(deviceId);
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    repository.removeListener(_repositoryListener);
+    super.dispose();
   }
 }
