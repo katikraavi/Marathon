@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import '../../data/repositories/runner_repository.dart';
 import '../../presentation/providers/runner_detail_provider.dart';
 import '../../data/models/health_state.dart';
-import '../../data/models/runner_data.dart';
 import '../../data/sources/websocket_source.dart';
 import '../../presentation/widgets/global_status_bar.dart';
 
@@ -25,7 +24,6 @@ class RunnerDetailScreen extends StatefulWidget {
 
 class _RunnerDetailScreenState extends State<RunnerDetailScreen> with WidgetsBindingObserver {
   late RunnerDetailProvider _detailProvider;
-  AppLifecycleState? _lastLifecycleState;
 
   @override
   void initState() {
@@ -149,7 +147,6 @@ class _DetailBodyState extends State<_DetailBody> {
           builder: (context, detailProvider, child) {
             final runner = detailProvider.runner;
             final health = runner.healthStatus;
-            final lastReport = runner.reports.isNotEmpty ? runner.reports.last : null;
             final healthColor = _getHealthColor(health.state);
 
             return SingleChildScrollView(
@@ -506,19 +503,6 @@ class _DetailBodyState extends State<_DetailBody> {
     );
   }
 
-  IconData _getEventIcon(String vitalType) {
-    switch (vitalType) {
-      case 'BP':
-        return Icons.favorite;
-      case 'Blood Oxygen':
-        return Icons.air;
-      case 'Temperature':
-        return Icons.thermostat;
-      default:
-        return Icons.info;
-    }
-  }
-
   Color _getHealthColor(HealthState state) {
     switch (state) {
       case HealthState.normal:
@@ -554,88 +538,6 @@ class _DetailBodyState extends State<_DetailBody> {
 }
 
 
-class _VitalTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final String unit;
-  final IconData icon;
-  final Color? color;
-
-  const _VitalTile({
-    required this.label,
-    required this.value,
-    required this.unit,
-    required this.icon,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-      decoration: BoxDecoration(
-        color: (color ?? Colors.blue).withOpacity(0.08),
-        border: Border.all(
-          color: (color ?? Colors.blue).withOpacity(0.2),
-          width: 0.5,
-        ),
-        borderRadius: BorderRadius.circular(2),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 20,
-            color: color ?? Colors.blue,
-          ),
-          const SizedBox(width: 1),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey.shade700,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: value,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: color ?? Colors.blue,
-                        ),
-                      ),
-                      TextSpan(
-                        text: ' $unit',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade600,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _VitalChart extends StatelessWidget {
   final List<ChartDataPoint> data;

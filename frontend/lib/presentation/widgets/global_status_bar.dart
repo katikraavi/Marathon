@@ -22,9 +22,6 @@ class GlobalStatusBar extends StatelessWidget {
     return ValueListenableBuilder<int>(
       valueListenable: RunnerDetailProvider.activeRunnersNotifier,
       builder: (context, _, __) {
-        final activeCount = RunnerDetailProvider.activeRunnersCount;
-        final pausedCount = totalRunners - activeCount;
-
         return Container(
           color: Colors.blue.shade900,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

@@ -211,17 +211,13 @@ class RunnerDetailProvider extends ChangeNotifier {
 
       // Detect status transition
       if (prevHealth != null && prevHealth.state != currentHealth.state) {
-        String statusIcon = '';
         String statusLabel = '';
         
         if (currentHealth.state == HealthState.emergency) {
-          statusIcon = '🚨';
           statusLabel = 'EMERGENCY';
         } else if (currentHealth.state == HealthState.warning) {
-          statusIcon = '⚠️';
           statusLabel = 'WARNING';
         } else {
-          statusIcon = '✅';
           statusLabel = 'NORMAL';
         }
 

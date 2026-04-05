@@ -22,7 +22,6 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
   late WebSocketService _webSocketService;
   late RunnerRepository _repository;
   bool _isConnected = false;
-  AppLifecycleState? _lastLifecycleState;
   
   // Track previous health states locally to detect changes
   final Map<int, HealthState> _previousStates = {};
@@ -93,7 +92,7 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
       });
 
       // Listen to reports and handle notifications
-      final subscription = _webSocketService.reportStream.listen((report) {
+      _webSocketService.reportStream.listen((report) {
         
         // Check for health state changes by comparing with our local tracking
         final runner = _repository.getRunner(report.deviceId);

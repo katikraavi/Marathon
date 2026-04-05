@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, WebSocket;
+import 'dart:io' show Platform;
 import 'package:web_socket_channel/io.dart';
 import '../../generated/reports.pb.dart';
 import '../models/report.dart';
