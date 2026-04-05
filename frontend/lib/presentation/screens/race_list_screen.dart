@@ -5,6 +5,7 @@ import '../../data/repositories/runner_repository.dart';
 import '../../data/models/runner_data.dart';
 import '../../presentation/providers/runners_provider.dart';
 import '../../presentation/providers/runner_detail_provider.dart';
+import '../../presentation/providers/auth_provider.dart';
 import '../../data/sources/websocket_source.dart';
 import '../../services/notification_service.dart';
 import '../../presentation/widgets/global_status_bar.dart';
@@ -171,6 +172,13 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
           centerTitle: true,
           elevation: 2,
           actions: [
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Logout',
+              onPressed: () {
+                context.read<AuthProvider>().logout();
+              },
+            ),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Center(
