@@ -154,10 +154,12 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Pause expensive operations when app goes to background
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      print('[LIFECYCLE] ⏸️ Race list: App backgrounded - reducing update frequency');
       // Repository will reduce update frequency when not visible
     }
     // Resume normal operations when app returns to foreground
     else if (state == AppLifecycleState.resumed) {
+      print('[LIFECYCLE] ▶️ Race list: App resumed - resuming full update frequency');
       setState(() {}); // Refresh list when app comes back to foreground
     }
   }

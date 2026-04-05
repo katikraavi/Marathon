@@ -115,6 +115,7 @@ class RunnerDetailProvider extends ChangeNotifier {
     _activeRunners.remove(deviceId);
     _refreshTimer?.cancel();
     _refreshTimer = null;
+    print('[VISIBILITY] ❌ Paused real-time updates for Runner #$deviceId');
   }
 
   // Resume updates when widget becomes visible (on-screen)
@@ -124,6 +125,7 @@ class RunnerDetailProvider extends ChangeNotifier {
     }
     _isVisible = true;
     final actuallyConnected = webSocketService.isConnected;
+    print('[VISIBILITY] ✅ Resumed real-time updates for Runner #$deviceId');
     
     // Defer state updates to avoid "widget tree locked" error during build
     WidgetsBinding.instance.addPostFrameCallback((_) {

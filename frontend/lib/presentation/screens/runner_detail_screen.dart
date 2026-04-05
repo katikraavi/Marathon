@@ -34,6 +34,7 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> with WidgetsBin
       webSocketService: context.read<WebSocketService>(),
     );
     // Start updates when screen is created
+    print('[LIFECYCLE] → Detail screen opened for Runner #${widget.deviceId}');
     _detailProvider.resumeUpdates();
     // Listen to app lifecycle changes
     WidgetsBinding.instance.addObserver(this);
@@ -41,6 +42,7 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> with WidgetsBin
 
   @override
   void dispose() {
+    print('[LIFECYCLE] ← Detail screen closed for Runner #${widget.deviceId}');
     // Pause updates when screen is destroyed
     _detailProvider.pauseUpdates();
     _detailProvider.dispose();
@@ -52,10 +54,12 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> with WidgetsBin
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Pause updates when app goes to background
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      print('[LIFECYCLE] ⏸️ App backgrounded - pausing Runner #${widget.deviceId} updates');
       _detailProvider.pauseUpdates();
     }
     // Resume updates when app returns to foreground
     else if (state == AppLifecycleState.resumed) {
+      print('[LIFECYCLE] ▶️ App resumed - resuming Runner #${widget.deviceId} updates');
       _detailProvider.resumeUpdates();
     }
   }
