@@ -1,5 +1,9 @@
 # Marathon Safety - Complete Documentation
 
+This is an app, for safety staff to monitor Maraton runners data. 
+Runners devices are sending constant data, and safety staff can see and analyse the health data in real time. 
+In case of dangerous or alarming health data, the app shows notifications. 
+
 **Status: PRODUCTION READY FOR SUBMISSION** ✅  
 **Completion: 25/25 Requirements (100%)**
 

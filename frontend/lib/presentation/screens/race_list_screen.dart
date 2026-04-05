@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
 import '../../data/models/health_state.dart';
 import '../../data/repositories/runner_repository.dart';
 import '../../data/models/runner_data.dart';
@@ -9,8 +10,10 @@ import '../../presentation/providers/auth_provider.dart';
 import '../../data/sources/websocket_source.dart';
 import '../../services/notification_service.dart';
 import '../../presentation/widgets/global_status_bar.dart';
+import '../../presentation/widgets/connection_status_banner.dart';
 import '../../main.dart' show scaffoldMessengerKey;
 import 'runner_detail_screen.dart';
+import 'marathon_map_screen.dart';
 
 class RaceListScreen extends StatefulWidget {
   const RaceListScreen({Key? key}) : super(key: key);
@@ -23,6 +26,8 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
   late WebSocketService _webSocketService;
   late RunnerRepository _repository;
   bool _isConnected = false;
+  DateTime _lastDataUpdate = DateTime.now();
+  Timer? _dataUpdateCheckTimer;
   
   // Track previous health states locally to detect changes
   final Map<int, HealthState> _previousStates = {};
@@ -85,16 +90,16 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
 
   void _setupListeners() {
     try {
-      // Update connection status from WebSocket
-      _webSocketService.connectionStatus.listen((isConnected) {
-        if (mounted) {
-          setState(() => _isConnected = isConnected);
-        }
-      });
-
-      // Listen to reports and handle notifications
+      // Listen to actual data updates (more reliable than connection status)
       _webSocketService.reportStream.listen((report) {
-        
+        _lastDataUpdate = DateTime.now();
+        if (!_isConnected) {
+          // Data received, so we must be connected
+          if (mounted) {
+            setState(() => _isConnected = true);
+          }
+        }
+
         // Check for health state changes by comparing with our local tracking
         final runner = _repository.getRunner(report.deviceId);
         
@@ -137,6 +142,26 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
           }
         }
       });
+
+      // Also listen to connection status as backup
+      _webSocketService.connectionStatus.listen((isConnected) {
+        if (mounted) {
+          setState(() => _isConnected = isConnected);
+        }
+      });
+
+      // Check for data staleness every 5 seconds
+      _dataUpdateCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (!mounted) return;
+        
+        final timeSinceUpdate = DateTime.now().difference(_lastDataUpdate);
+        // Consider offline if no data for 20 seconds AND WebSocket says disconnected
+        final shouldBeOffline = timeSinceUpdate > const Duration(seconds: 20) && !_webSocketService.isConnected;
+        
+        if (shouldBeOffline != _isConnected) {
+          setState(() => _isConnected = !shouldBeOffline);
+        }
+      });
     } catch (e) {
       // Silently handle listener setup errors
     }
@@ -144,6 +169,8 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
 
   @override
   void dispose() {
+    // Cancel data update check timer
+    _dataUpdateCheckTimer?.cancel();
     // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
     // Don't dispose global services - they should keep running
@@ -168,74 +195,112 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) => RunnersProvider(repository: _repository),
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Marathon Safety Monitoring'),
-          centerTitle: true,
-          elevation: 2,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Logout',
-              onPressed: () {
-                context.read<AuthProvider>().logout();
-              },
+      child: DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Marathon Safety Monitoring'),
+            centerTitle: true,
+            elevation: 2,
+            bottom: const TabBar(
+              tabs: [
+                Tab(icon: Icon(Icons.list), text: 'Runners List'),
+                Tab(icon: Icon(Icons.map), text: 'Course Map'),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Center(
-                child: Row(
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout),
+                tooltip: 'Logout',
+                onPressed: () {
+                  context.read<AuthProvider>().logout();
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Center(
+                  child: Row(
+                    children: [
+                      if (!_isConnected)
+                        Tooltip(
+                          message: 'Connecting to data stream...',
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.orange.shade400,
+                            ),
+                          ),
+                        )
+                      else
+                        Tooltip(
+                          message: 'Connected',
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.green,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          body: Column(
+            children: [
+              // Connection Status Banner
+              ConnectionStatusBanner(
+                isConnected: _isConnected,
+                onReconnected: () {
+                  try {
+                    final scaffoldMessenger = scaffoldMessengerKey.currentState;
+                    if (scaffoldMessenger != null) {
+                      scaffoldMessenger.clearSnackBars();
+                    }
+                  } catch (e) {
+                    // Silent error
+                  }
+                },
+              ),
+              
+              Expanded(
+                child: TabBarView(
                   children: [
-                    if (!_isConnected)
-                      Tooltip(
-                        message: 'Connecting to data stream...',
-                        child: Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.orange.shade400,
-                          ),
+                    // Tab 1: Runners List
+                    Column(
+                      children: [
+                        // Global Status Bar - shows update status for all runners
+                        Consumer<RunnersProvider>(
+                          builder: (context, provider, _) {
+                            return GlobalStatusBar(
+                              activeRunnerId: null, // null when viewing list
+                              totalRunners: provider.totalRunners,
+                            );
+                          },
                         ),
-                      )
-                    else
-                      Tooltip(
-                        message: 'Connected',
-                        child: Container(
-                          width: 12,
-                          height: 12,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ),
+                        
+                        // OPTIMIZATION: Separate Consumer for control bar (stats + filters)
+                        // This rebuilds independently from runner list
+                        _ControlBar(),
+                        
+                        // OPTIMIZATION: Separate Consumer for runner list
+                        // Only this widget rebuilds when runner data changes
+                        _RunnerListSection(repository: _repository),
+                      ],
+                    ),
+                    
+                    // Tab 2: Marathon Map
+                    const MarathonMapScreen(),
                   ],
                 ),
               ),
-            ),
-          ],
-        ),
-        body: Column(
-          children: [
-            // Global Status Bar - shows update status for all runners
-            Consumer<RunnersProvider>(
-              builder: (context, provider, _) {
-                return GlobalStatusBar(
-                  activeRunnerId: null, // null when viewing list
-                  totalRunners: provider.totalRunners,
-                );
-              },
-            ),
-            
-            // OPTIMIZATION: Separate Consumer for control bar (stats + filters)
-            // This rebuilds independently from runner list
-            _ControlBar(),
-            
-            // OPTIMIZATION: Separate Consumer for runner list
-            // Only this widget rebuilds when runner data changes
-            _RunnerListSection(repository: _repository),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -587,6 +652,9 @@ class _RunnerListTile extends StatelessWidget {
         final statusText = isActive ? '🟢 UPDATING' : '⏸️ PAUSED';
         final statusColor = isActive ? Colors.green : Colors.grey;
         
+        // Get warning indicators
+        final warningIndicators = _getWarningIndicators(runner.healthStatus.vitalDetails);
+        
         return ListTile(
           title: Row(
             children: [
@@ -611,17 +679,117 @@ class _RunnerListTile extends StatelessWidget {
               ),
             ],
           ),
-          subtitle: Text(
-            'Distance: ${runner.distance.toStringAsFixed(2)}m',
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Distance: ${runner.distance.toStringAsFixed(2)}m',
+              ),
+              const SizedBox(height: 6),
+              // Show warning indicators if any
+              if (warningIndicators.isNotEmpty)
+                Row(
+                  children: [
+                    Text(
+                      'Alerts: ',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 4,
+                        children: warningIndicators,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Text(
+                  'All vitals normal',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Colors.green[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+            ],
           ),
           trailing: Icon(
             _getHealthIcon(runner.healthStatus.state),
             color: _getHealthColor(runner.healthStatus.state),
+            size: 28,
           ),
           onTap: onTap,
         );
       },
     );
+  }
+
+  /// Get visual indicators for each vital that's in warning/emergency state
+  List<Widget> _getWarningIndicators(List<VitalDetail> vitals) {
+    final indicators = <Widget>[];
+    
+    for (final vital in vitals) {
+      if (vital.status == HealthState.emergency) {
+        indicators.add(_buildVitalIndicator(vital.name, Colors.red, true));
+      } else if (vital.status == HealthState.warning) {
+        indicators.add(_buildVitalIndicator(vital.name, Colors.orange, false));
+      }
+    }
+    
+    return indicators;
+  }
+
+  /// Build a small badge showing which vital is problematic
+  Widget _buildVitalIndicator(String vitalName, Color color, bool isEmergency) {
+    final icon = _getVitalIcon(vitalName);
+    
+    return Tooltip(
+      message: vitalName,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          border: Border.all(color: color, width: 1.5),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 11, color: color),
+            const SizedBox(width: 2),
+            Text(
+              isEmergency ? '!' : '⚠',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Get Material icon for each vital
+  IconData _getVitalIcon(String vitalName) {
+    switch (vitalName.toLowerCase()) {
+      case 'heartbeat':
+        return Icons.favorite;
+      case 'breath rate':
+        return Icons.air;
+      case 'systolic bp':
+        return Icons.trending_up;
+      case 'diastolic bp':
+        return Icons.trending_down;
+      case 'blood oxygen':
+        return Icons.opacity;
+      case 'temperature':
+        return Icons.thermostat;
+      default:
+        return Icons.info;
+    }
   }
 
   Color _getHealthColor(HealthState state) {
