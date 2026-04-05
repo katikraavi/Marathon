@@ -52,6 +52,20 @@ class WebSocketService {
 
   Future<void> connect() async {
     try {
+      // Clean up old channels before reconnecting
+      try {
+        _timeBasedChannel.sink.close();
+      } catch (_) {}
+      try {
+        _eventBasedChannel.sink.close();
+      } catch (_) {}
+      
+      if (_reconnectAttempts > 0) {
+        print('[WebSocket] 🔄 Attempting reconnection (attempt ${_reconnectAttempts + 1})...');
+      } else {
+        print('[WebSocket] 🔗 Initial connection attempt...');
+      }
+      
       // Construct full WebSocket URLs
       final timeBasedUrl = '$_baseUrl${AppConstants.timeBasedReportsEndpoint}';
       final eventBasedUrl = '$_baseUrl${AppConstants.eventBasedReportsEndpoint}';
@@ -80,17 +94,20 @@ class WebSocketService {
       _reconnectAttempts = 0;
       _lastMessageTime = DateTime.now();
       _connectionStatus.add(true);
+      print('[WebSocket] ✅ Connected successfully');
 
       _startKeepAlive();
       _startStalenessCheck();
       _listenToTimeBasedReports();
       _listenToEventBasedReports();
     } catch (e) {
+      print('[WebSocket] ❌ Connection failed: $e');
       _handleConnectionError();
     }
   }
 
   void _listenToTimeBasedReports() {
+    print('[WebSocket] 📊 Listening for time-based reports...');
     _timeBasedChannel.stream.listen(
       (dynamic message) {
         try {
@@ -138,9 +155,11 @@ class WebSocketService {
         }
       },
       onError: (error) {
+        print('[WebSocket] ❌ Stream error: $error');
         _handleConnectionError();
       },
       onDone: () {
+        print('[WebSocket] 🔌 Time-based stream closed');
         _handleConnectionError();
       },
     );
@@ -236,9 +255,13 @@ class WebSocketService {
     
     final nextDelay = Duration(seconds: backoffSeconds);
     
+    print('[WebSocket] ⚠️ Connection error - will retry in ${backoffSeconds}s (attempt $_reconnectAttempts)');
+    
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(nextDelay, () {
-      connect();
+      if (!_reportStream.isClosed) {
+        connect();
+      }
     });
   }
 
@@ -271,11 +294,11 @@ class WebSocketService {
       final timeSinceLastMessage = DateTime.now().difference(_lastMessageTime);
       
       if (timeSinceLastMessage > stalenessThreshold) {
-        print('[WebSocket] Connection stale (no data for ${timeSinceLastMessage.inSeconds}s), '
+        print('[WebSocket] ⏱️ Connection stale (no data for ${timeSinceLastMessage.inSeconds}s), '
               'forcing reconnect');
         _handleConnectionError();
       } else if (timeSinceLastMessage.inSeconds > 5) {
-        print('[WebSocket] Connection becoming stale (${timeSinceLastMessage.inSeconds}s since last message)');
+        print('[WebSocket] 📈 Receiving data (${timeSinceLastMessage.inSeconds}s since last message)');
       }
     });
   }
