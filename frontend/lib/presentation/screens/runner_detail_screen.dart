@@ -58,7 +58,6 @@ class _RunnerDetailScreenState extends State<RunnerDetailScreen> with WidgetsBin
     else if (state == AppLifecycleState.resumed) {
       _detailProvider.resumeUpdates();
     }
-    _lastLifecycleState = state;
   }
 
   @override

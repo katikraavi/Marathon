@@ -159,7 +159,6 @@ class _RaceListScreenState extends State<RaceListScreen> with WidgetsBindingObse
     else if (state == AppLifecycleState.resumed) {
       setState(() {}); // Refresh list when app comes back to foreground
     }
-    _lastLifecycleState = state;
   }
 
   @override
