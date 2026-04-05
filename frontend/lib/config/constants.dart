@@ -1,5 +1,5 @@
 class AppConstants {
-  // Default login credentials (test req #4)
+  // Default login credentials
   static const String defaultUsername = 'admin';
   static const String defaultPassword = 'admin123';
 

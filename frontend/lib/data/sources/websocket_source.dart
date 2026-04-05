@@ -52,40 +52,27 @@ class WebSocketService {
 
   Future<void> connect() async {
     try {
-      print('[WebSocket] Attempting to connect to $_baseUrl');
-      print('[WebSocket] Platform check - isAndroid: ${Platform.isAndroid}, isIOS: ${Platform.isIOS}, isLinux: ${Platform.isLinux}');
-      
       // Construct full WebSocket URLs
       final timeBasedUrl = '$_baseUrl${AppConstants.timeBasedReportsEndpoint}';
       final eventBasedUrl = '$_baseUrl${AppConstants.eventBasedReportsEndpoint}';
-      
-      print('[WebSocket] Time-based URL: $timeBasedUrl');
-      print('[WebSocket] Event-based URL: $eventBasedUrl');
 
       // Connect time-based reports FIRST (primary data source)
       try {
-        print('[WebSocket] Starting time-based connection...');
         _timeBasedChannel = IOWebSocketChannel.connect(timeBasedUrl, headers: {
           'Connection': 'Upgrade',
           'Upgrade': 'websocket',
           'Sec-WebSocket-Version': '13',
         });
         await _timeBasedChannel.ready;
-        print('[WebSocket] Time-based connection ready');
       } catch (e) {
-        print('[WebSocket] Time-based connection failed: $e');
         rethrow;
       }
 
       // Try event-based connection (secondary, non-critical)
       try {
         _eventBasedChannel = IOWebSocketChannel.connect(eventBasedUrl);
-        await _timeBasedChannel.ready.timeout(Duration(seconds: 5), onTimeout: () {
-          print('[WebSocket] Event-based connection timeout (non-critical)');
-        });
-        print('[WebSocket] Event-based connection ready');
+        await _timeBasedChannel.ready.timeout(Duration(seconds: 5));
       } catch (e) {
-        print('[WebSocket] Event-based connection failed (non-critical): $e');
         // Don't fail if event-based fails - time-based is sufficient
       }
 
@@ -93,19 +80,12 @@ class WebSocketService {
       _reconnectAttempts = 0;
       _lastMessageTime = DateTime.now();
       _connectionStatus.add(true);
-      print('[WebSocket] Connected successfully (time-based active)');
 
-      // Start keep-alive heartbeat to prevent connection drops
       _startKeepAlive();
-      
-      // Start staleness detection to detect broken connections early
       _startStalenessCheck();
-
-      // Listen to both streams
       _listenToTimeBasedReports();
       _listenToEventBasedReports();
     } catch (e) {
-      print('[WebSocket] Connection failed: $e');
       _handleConnectionError();
     }
   }
@@ -122,7 +102,6 @@ class WebSocketService {
               final json = jsonDecode(message) as Map<String, dynamic>;
               report = Report.fromJson(json);
             } catch (e) {
-              print('[WebSocket] JSON parse failed, trying as List<int>: $e');
               rethrow;
             }
           } else if (message is List<int>) {
@@ -137,13 +116,10 @@ class WebSocketService {
                 final json = jsonDecode(jsonString) as Map<String, dynamic>;
                 report = Report.fromJson(json);
               } catch (e2) {
-                print('[WebSocket] Both protobuf and JSON parsing failed');
-                print('[WebSocket] Error details: $e, $e2');
                 rethrow;
               }
             }
           } else {
-            print('[WebSocket] Unknown message type: ${message.runtimeType}');
             return;
           }
           
@@ -158,15 +134,13 @@ class WebSocketService {
           }
           
         } catch (e) {
-          print('[WebSocket] Error parsing time-based report: $e');
+          // Silently skip malformed messages
         }
       },
       onError: (error) {
-        print('[WebSocket] Time-based stream error: $error');
         _handleConnectionError();
       },
       onDone: () {
-        print('[WebSocket] Time-based stream closed');
         _handleConnectionError();
       },
     );
@@ -262,12 +236,8 @@ class WebSocketService {
     
     final nextDelay = Duration(seconds: backoffSeconds);
     
-    print('[WebSocket] Reconnecting in ${nextDelay.inSeconds}s '
-          '(attempt $_reconnectAttempts, adaptive backoff)');
-    
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(nextDelay, () {
-      print('[WebSocket] Attempting to reconnect (attempt $_reconnectAttempts)...');
       connect();
     });
   }
@@ -279,17 +249,14 @@ class WebSocketService {
     _keepAliveTimer = Timer.periodic(keepAliveInterval, (_) {
       try {
         if (_isConnected && _timeBasedChannel.closeCode == null) {
-          // Send ping frame to server (WebSocket protocol level)
-          // This keeps NAT mappings alive and prevents proxy timeouts
-          print('[WebSocket] Sending keep-alive ping');
-          _timeBasedChannel.sink.add('ping');  // Simple ping message
+          _timeBasedChannel.sink.add('ping');
           
           if (_eventBasedChannel.closeCode == null) {
             _eventBasedChannel.sink.add('ping');
           }
         }
       } catch (e) {
-        print('[WebSocket] Keep-alive error: $e');
+        // Keep-alive error, will be handled by staleness check
       }
     });
   }
@@ -328,9 +295,8 @@ class WebSocketService {
     try {
       await _timeBasedChannel.sink.close();
       await _eventBasedChannel.sink.close();
-      print('[WebSocket] Disconnected gracefully');
     } catch (e) {
-      print('[WebSocket] Error during disconnect: $e');
+      // Disconnect error, connection may already be closed
     }
   }
 

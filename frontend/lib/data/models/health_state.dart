@@ -178,7 +178,7 @@ class HealthStatus {
       normalRange: '36.0-38.5',
     ));
 
-    // Determine final state (test req #11)
+    // Determine final state
     if (emergencies.isNotEmpty) {
       return HealthStatus(
         state: HealthState.emergency,

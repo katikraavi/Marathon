@@ -16,7 +16,7 @@ class AuthProvider extends ChangeNotifier {
     // Simulate network delay
     await Future.delayed(const Duration(milliseconds: 500));
 
-    // Validate against fixed credentials (test req #4)
+    // Validate against fixed credentials
     if (username == AppConstants.defaultUsername &&
         password == AppConstants.defaultPassword) {
       _isLoggedIn = true;

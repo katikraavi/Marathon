@@ -13,9 +13,6 @@ final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<Scaffol
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  print('═══════════════════════════════════════════════════════════');
-  print('✓ Marathon Safety App Started');
-  print('═══════════════════════════════════════════════════════════');
   
   // Initialize notifications service
   await NotificationService().initialize();
@@ -23,7 +20,6 @@ void main() async {
   // Initialize global services and start loading data BEFORE showing UI
   _globalRepository = RunnerRepository();
   _globalWebSocketService = WebSocketService();
-  print('[Startup] Services initialized');
   
   // Start connecting to WebSocket immediately (data loads while user is on login screen)
   // Wrap in try-catch to prevent app crash if WebSocket fails
@@ -36,11 +32,11 @@ void main() async {
         _globalRepository.addReport(report);
       },
       onError: (error) {
-        print('[WebSocket Error] Report stream error: $error');
+        // WebSocket stream error, connection will attempt auto-reconnect
       },
     );
   } catch (e) {
-    print('[Error] Failed to connect WebSocket: $e');
+    // WebSocket connection failed, app will continue with empty data
   }
   
   runApp(const MarathonSafetyApp());

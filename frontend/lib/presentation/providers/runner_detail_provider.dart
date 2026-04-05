@@ -28,7 +28,6 @@ class RunnerDetailProvider extends ChangeNotifier {
     required this.deviceId,
     required this.webSocketService,
   }) {
-    print('[Provider] Created for Runner #$deviceId');
     // Listen to repository for all updates
     repository.addListener(_onRepositoryChanged);
     
@@ -36,7 +35,6 @@ class RunnerDetailProvider extends ChangeNotifier {
     _connectionStatusSubscription = webSocketService.connectionStatus.listen((isConnected) {
       if (_disposed) return;
       
-      print('[Connection] Status change: isConnected=$isConnected, _isVisible=$_isVisible, hadTimer=${_refreshTimer != null}');
       _isConnected = isConnected;
       
       // When connection is lost, stop the update timer immediately
@@ -46,16 +44,15 @@ class RunnerDetailProvider extends ChangeNotifier {
         final wasActive = _activeRunners.contains(deviceId);
         _activeRunners.remove(deviceId);
         if (wasActive) {
-          print('[Update] DISCONNECTED Runner #$deviceId (now ${_activeRunners.length} updating)');
+          // Removed from active updates
         }
-        _activeRunnersNotifier.value = _activeRunners.length; // Set to actual count
+        _activeRunnersNotifier.value = _activeRunners.length;
       } 
       // When connection is restored and we're visible, restart the timer
       else if (isConnected && _isVisible) {
         _activeRunners.add(deviceId);
         _startTimerIfNeeded();
-        print('[Update] RECONNECTED Runner #$deviceId (now ${_activeRunners.length} updating)');
-        _activeRunnersNotifier.value = _activeRunners.length; // Set to actual count
+        _activeRunnersNotifier.value = _activeRunners.length;
       }
       
       notifyListeners();
@@ -93,68 +90,49 @@ class RunnerDetailProvider extends ChangeNotifier {
   /// Start the refresh timer if not already running and conditions allow
   /// This timer is only for UI rebuilds, NOT for incrementing the counter
   void _startTimerIfNeeded() {
-    if (_refreshTimer != null) return; // Already running
-    if (!_isVisible || !_isConnected) return; // Conditions not met
+    if (_refreshTimer != null) return;
+    if (!_isVisible || !_isConnected) return;
     
-    _updateCount = 0; // Reset counter when resuming
+    _updateCount = 0;
     _refreshTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
-      // Timer ONLY forces UI rebuild - does NOT increment counter
-      // Counter is incremented ONLY when data actually arrives (in _onRepositoryChanged)
       if (_isVisible && _isConnected) {
-        notifyListeners(); // Rebuild UI to show latest data
+        notifyListeners();
       }
     });
   }
 
   // Pause updates when widget is not visible (off-screen)
   void pauseUpdates() {
-    print('[Pause] pauseUpdates called for Runner #$deviceId');
     if (_disposed) {
-      print('[Pause]   Already disposed, skipping');
       return;
     }
     _isVisible = false;
-    final wasActive = _activeRunners.contains(deviceId);
-    print('[Pause]   Was active: $wasActive, Active runners: ${_activeRunners.length}');
-    _activeRunners.remove(deviceId); // Remove from active set
+    _activeRunners.remove(deviceId);
     _refreshTimer?.cancel();
     _refreshTimer = null;
-    if (wasActive) {
-      print('[Update] PAUSED Runner #$deviceId (now ${_activeRunners.length} updating)');
-    }
-    // Update notifier to reflect actual count
     _activeRunnersNotifier.value = _activeRunners.length;
     notifyListeners();
   }
 
   // Resume updates when widget becomes visible (on-screen)
   void resumeUpdates() {
-    print('[Resume] resumeUpdates called for Runner #$deviceId');
     if (_disposed) {
-      print('[Resume]   Already disposed, skipping');
       return;
     }
     _isVisible = true;
-    // Get actual connection status from WebSocketService, not just cached value
     final actuallyConnected = webSocketService.isConnected;
-    print('[Resume]   Connected: $actuallyConnected (cached: $_isConnected), Active runners: ${_activeRunners.length}');
-    // Add to active set if connected (use actual status)
     if (actuallyConnected) {
-      _activeRunners.add(deviceId); // Add to active set
-      _startTimerIfNeeded(); // Start timer with all checks
-      print('[Update] ACTIVE Runner #$deviceId (now ${_activeRunners.length} updating)');
-      // Update notifier to reflect actual count
+      _activeRunners.add(deviceId);
+      _startTimerIfNeeded();
       _activeRunnersNotifier.value = _activeRunners.length;
       notifyListeners();
     } else {
-      print('[Resume]   Not connected, skipping timer start');
-      notifyListeners(); // Update status display even if not connected
+      notifyListeners();
     }
   }
 
   @override
   void dispose() {
-    print('[Dispose] Runner #$deviceId, was active: ${_activeRunners.contains(deviceId)}');
     _disposed = true;
     repository.removeListener(_onRepositoryChanged);
     _connectionStatusSubscription?.cancel();

@@ -100,7 +100,7 @@ class RunnerRepository extends ChangeNotifier {
       runner.addReport(report);
       final newStatus = runner.healthStatus;
 
-      // Track health state changes for notifications (test req #12)
+      // Track health state changes for notifications
       if (previousStatus == null ||
           previousStatus.state != newStatus.state) {
         _previousHealthStatus[report.deviceId] = newStatus;
