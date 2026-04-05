@@ -110,8 +110,6 @@ class RunnerDetailProvider extends ChangeNotifier {
     _activeRunners.remove(deviceId);
     _refreshTimer?.cancel();
     _refreshTimer = null;
-    _activeRunnersNotifier.value = _activeRunners.length;
-    notifyListeners();
   }
 
   // Resume updates when widget becomes visible (on-screen)
@@ -138,6 +136,7 @@ class RunnerDetailProvider extends ChangeNotifier {
     _connectionStatusSubscription?.cancel();
     _refreshTimer?.cancel();
     _activeRunners.remove(deviceId);
+    // Don't update notifier during disposal - widget tree is locked
     super.dispose();
   }
 
